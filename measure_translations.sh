@@ -29,6 +29,9 @@ case "${1:-}" in
 (all|"")
 	FRAMEWORKS_TO_RUN=("noarr" "polly" "halide" "exo") ;;
 
+(frameworks)
+	FRAMEWORKS_TO_RUN=("noarr" "halide" "exo") ;;
+
 (*)
 	echo "Unsupported framework: ${1:-}" >&2
 	FRAMEWORKS_TO_RUN=()

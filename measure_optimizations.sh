@@ -53,8 +53,6 @@ case "${2:-}" in
 (choose_hints)
 	VERSIONS_TO_RUN=("choose_hints") ;;
 
-(to_model)
-	VERSIONS_TO_RUN=("to_model") ;;
 (from_model)
 	VERSIONS_TO_RUN=("from_model") ;;
 
@@ -70,7 +68,6 @@ case "${2:-}" in
 		"all_hints"
 		"choose_hints"
 
-		"to_model"
 		"from_model"
 	) ;;
 
