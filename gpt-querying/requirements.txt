@@ -1,0 +1,10 @@
+python-dotenv
+openai>=1.0.0
+colorama
+munch
+
+halide
+
+numpy
+pandas
+matplotlib

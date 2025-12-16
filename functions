@@ -1,0 +1,2291 @@
+#!/bin/bash
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "This file should be sourced, not executed. Use 'source functions' or '. ./functions'" >&2
+    exit 1
+fi
+
+GPT_QUERYING_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")"/gpt-querying)"
+
+NOARR_STRUCTURES_DIR="$(realpath "${GPT_QUERYING_DIR}/../submodules/noarr-structures")"
+EXO_DIR="$(realpath "${GPT_QUERYING_DIR}/../submodules/exo")"
+
+PATIENCE=8m
+
+export GPT_QUERYING_DIR
+export NOARR_STRUCTURES_DIR
+export EXO_DIR
+
+export PATIENCE
+
+(
+    cd "${GPT_QUERYING_DIR}" || exit 1
+
+    # Ensure the virtual environment is created
+    if [ ! -d ".venv" ]; then
+        python3 -m venv .venv
+    fi
+
+    # If the virtual environment is not activated, activate it
+    if [ -z "${VIRTUAL_ENV:-}" ]; then
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+    fi
+
+    # Upgrade pip and install required packages
+    pip install --upgrade pip
+    pip install -r requirements.txt
+)
+
+# shellcheck disable=SC1091
+source "${GPT_QUERYING_DIR}/.venv/bin/activate"
+
+
+reload() {
+    # shellcheck disable=SC1091
+    source "${GPT_QUERYING_DIR}/../functions"
+}
+
+
+unload() {
+    unset -f generate
+    unset -f print_cost_estimate
+    unset -f cleanup
+    unset -f translate
+    unset -f optimize
+    unset -f to_model
+    unset -f from_model
+    unset -f receive
+    unset -f patch
+    unset -f build
+    unset -f replace_codes
+    unset -f invalidate_codes
+    unset -f postprocess_codes
+    unset -f reload
+    unset -f unload
+    unset -f run
+    unset -f check_translation
+    unset -f check_optimization
+    unset -f commands
+    unset -f functions
+
+    deactivate 2>/dev/null || true
+
+    unset GPT_QUERYING_DIR
+    unset NOARR_STRUCTURES_DIR
+    unset EXO_DIR
+}
+
+
+generate() {
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+        python main.py "$@"
+    )
+}
+
+
+translate() {
+    # translate [framework] [provider] [algorithm_category] [options]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (openai)
+            PROVIDER="openai" ;;
+          (anthropic)
+            PROVIDER="anthropic" ;;
+          (google)
+            PROVIDER="google" ;;
+          ("")
+            PROVIDER="openai" ;;
+
+          (*)
+            echo "Unsupported provider: ${2:-}" >&2
+            return 1 ;;
+        esac
+
+        case "${3:-}" in
+          (full|all|"")
+            ALGORITHM_CATEGORY="full" ;;
+          (full_part*)
+            ALGORITHM_CATEGORY="full_part${3#full_part}" ;;
+          (test)
+            ALGORITHM_CATEGORY="test" ;;
+
+          (datamining|dm|data-mining)
+            ALGORITHM_CATEGORY="datamining" ;;
+          (linear-algebra|la)
+            ALGORITHM_CATEGORY="linear-algebra" ;;
+          (stencil|stencils)
+            ALGORITHM_CATEGORY="stencil" ;;
+          (medley)
+            ALGORITHM_CATEGORY="medley" ;;
+
+          (*)
+            echo "Unsupported algorithm category: ${3:-}" >&2
+            return 1 ;;
+        esac
+
+        shift 3 || shift 2 || shift 1 || true
+
+        if [ "${PROVIDER}" == "openai" ]; then
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                if [ -f "../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
+                    python run_batch.py --request  "../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
+                else
+                    echo "Request file ../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
+                fi
+            done
+        else
+            echo "Translation for provider ${PROVIDER} is not implemented yet." >&2
+            return 1
+        fi
+    )
+}
+
+optimize() {
+    # optimize [framework] [version] [provider] [algorithm_category] [options]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${2:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        case "${3:-}" in
+          (openai)
+            PROVIDER="openai" ;;
+          (anthropic)
+            PROVIDER="anthropic" ;;
+          (google)
+            PROVIDER="google" ;;
+          ("")
+            PROVIDER="openai" ;;
+
+          (*)
+            echo "Unsupported provider: ${3:-}" >&2
+            return 1 ;;
+        esac
+
+        case "${4:-}" in
+          (full|all|"")
+            ALGORITHM_CATEGORY="full" ;;
+          (full_part*)
+            ALGORITHM_CATEGORY="full_part${4#full_part}" ;;
+          (test)
+            ALGORITHM_CATEGORY="test" ;;
+
+          (datamining|dm|data-mining)
+            ALGORITHM_CATEGORY="datamining" ;;
+          (linear-algebra|la)
+            ALGORITHM_CATEGORY="linear-algebra" ;;
+          (stencil|stencils)
+            ALGORITHM_CATEGORY="stencil" ;;
+          (medley)
+            ALGORITHM_CATEGORY="medley" ;;
+
+          (*)
+            echo "Unsupported algorithm category: ${4:-}" >&2
+            return 1 ;;
+        esac
+
+        shift 4 || shift 3 || shift 2 || shift 1 || true
+
+        if [ "${PROVIDER}" == "openai" ]; then
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                for version in "${VERSIONS_TO_RUN[@]}"; do
+                    if [ -f "../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl" ]; then
+                        python run_batch.py --request  "../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl" "$@"
+                    else
+                        echo "Request file ../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
+                    fi
+                done
+            done
+        else
+            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
+            return 1
+        fi
+    )
+}
+
+to_model() {
+    # to_model <framework> <provider> <algorithm_category> [<other_args>...]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (openai)
+            PROVIDER="openai" ;;
+          (anthropic)
+            PROVIDER="anthropic" ;;
+          (google)
+            PROVIDER="google" ;;
+          ("")
+            PROVIDER="openai" ;;
+
+          (*)
+            echo "Unsupported provider: ${2:-}" >&2
+            return 1 ;;
+        esac
+
+        case "${3:-}" in
+          (full|all|"")
+            ALGORITHM_CATEGORY="full" ;;
+          (full_part*)
+            ALGORITHM_CATEGORY="full_part${3#full_part}" ;;
+          (test)
+            ALGORITHM_CATEGORY="test" ;;
+
+          (datamining|dm|data-mining)
+            ALGORITHM_CATEGORY="datamining" ;;
+          (linear-algebra|la)
+            ALGORITHM_CATEGORY="linear-algebra" ;;
+          (stencil|stencils)
+            ALGORITHM_CATEGORY="stencil" ;;
+          (medley)
+            ALGORITHM_CATEGORY="medley" ;;
+
+          (*)
+            echo "Unsupported algorithm category: ${3:-}" >&2
+            return 1 ;;
+        esac
+
+        shift 3 || shift 2 || shift 1 || true
+
+        if [ "${PROVIDER}" == "openai" ]; then
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                if [ -f "../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
+                    python run_batch.py --request  "../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
+                else
+                    echo "Request file ../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
+                fi
+            done
+        else
+            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
+            return 1
+        fi
+    )
+}
+
+from_model() {
+    # from_model <framework> <provider> <algorithm_category> [<other_args>...]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (openai)
+            PROVIDER="openai" ;;
+          (anthropic)
+            PROVIDER="anthropic" ;;
+          (google)
+            PROVIDER="google" ;;
+          ("")
+            PROVIDER="openai" ;;
+
+          (*)
+            echo "Unsupported provider: ${2:-}" >&2
+            return 1 ;;
+        esac
+
+        case "${3:-}" in
+          (full|all|"")
+            ALGORITHM_CATEGORY="full" ;;
+          (full_part*)
+            ALGORITHM_CATEGORY="full_part${3#full_part}" ;;
+          (test)
+            ALGORITHM_CATEGORY="test" ;;
+
+          (datamining|dm|data-mining)
+            ALGORITHM_CATEGORY="datamining" ;;
+          (linear-algebra|la)
+            ALGORITHM_CATEGORY="linear-algebra" ;;
+          (stencil|stencils)
+            ALGORITHM_CATEGORY="stencil" ;;
+          (medley)
+            ALGORITHM_CATEGORY="medley" ;;
+
+          (*)
+            echo "Unsupported algorithm category: ${3:-}" >&2
+            return 1 ;;
+        esac
+
+        shift 3 || shift 2 || shift 1 || true
+
+        if [ "${PROVIDER}" == "openai" ]; then
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                if [ -f "../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
+                    python run_batch.py --request  "../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
+                else
+                    echo "Request file ../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
+                fi
+            done
+        else
+            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
+            return 1
+        fi
+    )
+}
+
+receive() {
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (openai)
+            PROVIDER="openai" ;;
+          (anthropic)
+            PROVIDER="anthropic" ;;
+          (google)
+            PROVIDER="google" ;;
+          ("")
+            PROVIDER="openai" ;;
+
+          (*)
+            echo "Unsupported provider: ${1:-}" >&2
+            return 1 ;;
+        esac
+
+        shift 1
+
+        if [ "${PROVIDER}" == "openai" ]; then
+            python run_batch.py --receive "$@"
+        else
+            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
+            return 1
+        fi
+    )
+}
+
+
+print_cost_estimate() {
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+        grep -rEe '"total_cost": ' ../generated/ | awk '{sum += $NF} END { print sum }'
+    )
+}
+
+
+cleanup() {
+    # cleanup [do|check|dry] [framework] [version]
+    (
+        if [ "${1:-}" == "do" ]; then
+            DO_RUN=true
+        elif [ "${1:-}" == "check" ]; then
+            DO_RUN=false
+            DIFF_RUN=true
+        elif [ "${1:-}" == "dry" ] || [ -z "${1:-}" ]; then
+            DO_RUN=false
+            DIFF_RUN=true
+            echo "Dry run mode: No files will be replaced." >&2
+        else
+            DO_RUN=false
+            DIFF_RUN=false
+            echo "Dry run mode: No files will be replaced." >&2
+        fi
+
+        case "${2:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${3:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (to_model)
+            VERSIONS_TO_RUN=("to_model") ;;
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "to_model"
+                "from_model"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${3:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../generated"
+            [naive]="../optimization"
+
+            [arithmetic]="../optimization"
+            [cache]="../optimization"
+            [structure]="../optimization"
+            [parallelism]="../optimization"
+
+            [all_hints]="../optimization"
+            [choose_hints]="../optimization"
+
+            [to_model]="../to_model"
+            [from_model]="../from_model"
+        )
+
+        declare -A VERSION_SUFFIXES=(
+            [standard]=""
+            [naive]="_naive"
+
+            [arithmetic]="_arithmetic"
+            [cache]="_cache"
+            [structure]="_structure"
+            [parallelism]="_parallelism"
+
+            [all_hints]="_all_hints"
+            [choose_hints]="_choose_hints"
+
+            [to_model]=""
+            [from_model]="_from_model"
+        )
+
+        for version in "${VERSIONS_TO_RUN[@]}"; do
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                prefix="${VERSION_PREFIXES[$version]}"
+                suffix="${VERSION_SUFFIXES[$version]}"
+
+                dir="${prefix}/${framework}${suffix}"
+
+                if [ -d "${dir}" ]; then
+                    if [ "${DO_RUN}" == true ]; then
+                        echo "Cleaning directory: ${dir}" >&2
+                        git clean -fdx -- "${dir}"
+                    elif [ "${DIFF_RUN}" == true ]; then
+                        echo "Checking cleanliness of directory: ${dir}" >&2
+                        git clean -ndx -- "${dir}"
+                    fi
+                else
+                    echo "Directory ${dir} does not exist. Skipping." >&2
+                fi
+            done
+        done
+    )
+}
+
+
+patch() {
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        for patch_file in ../patches/*.patch; do
+            patch_file="$(realpath "${patch_file}")"
+
+            if [ -f "${patch_file}" ]; then
+                echo "Applying patch: ${patch_file}"
+                base_name=$(basename "${patch_file}" .patch)
+
+                if [ ! -d "../submodules/${base_name}" ]; then
+                    echo "Directory ../submodules/${base_name} does not exist. Skipping." >&2
+                    continue
+                fi
+
+                (
+                    cd "../submodules/${base_name}" || exit 1
+                    # restore to clean state before applying patch
+                    git reset --hard HEAD
+                    git clean -fdx
+                    git apply "${patch_file}"
+                )
+            else
+                echo "No patch files found in ../patches/. Skipping." >&2
+            fi
+        done
+    )
+}
+
+
+build() {
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (polly)
+            FRAMEWORKS_TO_RUN=("polly") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "polly" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "from_model"
+            ) ;;
+          (*)
+            echo "Unsupported version: ${2:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        shift 2 || shift 1 || true
+
+        if [ "${#FRAMEWORKS_TO_RUN[@]}" -eq 0 ] || [ "${#VERSIONS_TO_RUN[@]}" -eq 0 ]; then
+            exit 1
+        fi
+
+        declare -A FRAMEWORK_PATHS=(
+            [c]="PolybenchC-4.2.1"
+            [polly]="PolybenchC-Polly"
+            [noarr]="PolybenchC-Noarr"
+            [halide]="PolybenchC-Halide"
+            [exo]="PolybenchC-Exo"
+        )
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../"
+            [naive]="../optimization/naive/"
+
+            [arithmetic]="../optimization/arithmetic/"
+            [cache]="../optimization/cache/"
+            [structure]="../optimization/structure/"
+            [parallelism]="../optimization/parallelism/"
+
+            [all_hints]="../optimization/all_hints/"
+            [choose_hints]="../optimization/choose_hints/"
+
+            [from_model]="../from_model/"
+        )
+
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            base_path="${FRAMEWORK_PATHS[$framework]}"
+
+            for version in "${VERSIONS_TO_RUN[@]}"; do
+                prefix="${VERSION_PREFIXES[$version]}"
+                if [ -z "${prefix}" ]; then
+                    echo "No prefix configured for version ${version}. Skipping." >&2
+                    continue
+                fi
+
+                dir="${prefix}${base_path}"
+
+                if [ -d "${dir}" ]; then
+                    (
+                        cd "${dir}" || exit 1
+                        if [ -f build.sh ]; then
+                            ./build.sh "$@"
+                        else
+                            echo "No build.sh found in ${dir}. Skipping." >&2
+                        fi
+                    )
+                else
+                    echo "Directory ${dir} does not exist. Skipping." >&2
+                fi
+            done
+        done
+    )
+}
+
+
+replace_codes() {
+    # replace_codes [do|check|dry] [framework] [version] [repetition_number] [algorithm]
+    (
+        C_PAIRS=(
+            "../PolybenchC-4.2.1/ ../generated/c/"
+            "../optimization/naive/PolybenchC-4.2.1/ ../optimization/c_naive/"
+
+            "../optimization/arithmetic/PolybenchC-4.2.1/ ../optimization/c_arithmetic/"
+            "../optimization/cache/PolybenchC-4.2.1/ ../optimization/c_cache/"
+            "../optimization/structure/PolybenchC-4.2.1/ ../optimization/c_structure/"
+            "../optimization/parallelism/PolybenchC-4.2.1/ ../optimization/c_parallelism/"
+
+            "../optimization/all_hints/PolybenchC-4.2.1/ ../optimization/c_all_hints/"
+            "../optimization/choose_hints/PolybenchC-4.2.1/ ../optimization/c_choose_hints/"
+
+            "../from_model/PolybenchC-4.2.1/ ../from_model/c/"
+        )
+
+        NOARR_PAIRS=(
+            "../PolybenchC-Noarr/ ../generated/noarr/"
+            "../optimization/naive/PolybenchC-Noarr/ ../optimization/noarr_naive/"
+
+            "../optimization/arithmetic/PolybenchC-Noarr/ ../optimization/noarr_arithmetic/"
+            "../optimization/cache/PolybenchC-Noarr/ ../optimization/noarr_cache/"
+            "../optimization/structure/PolybenchC-Noarr/ ../optimization/noarr_structure/"
+            "../optimization/parallelism/PolybenchC-Noarr/ ../optimization/noarr_parallelism/"
+
+            "../optimization/all_hints/PolybenchC-Noarr/ ../optimization/noarr_all_hints/"
+            "../optimization/choose_hints/PolybenchC-Noarr/ ../optimization/noarr_choose_hints/"
+
+            "../from_model/PolybenchC-Noarr/ ../from_model/noarr/"
+        )
+
+        HALIDE_PAIRS=(
+            "../PolybenchC-Halide/ ../generated/halide/"
+            "../optimization/naive/PolybenchC-Halide/ ../optimization/halide_naive/"
+
+            "../optimization/arithmetic/PolybenchC-Halide/ ../optimization/halide_arithmetic/"
+            "../optimization/cache/PolybenchC-Halide/ ../optimization/halide_cache/"
+            "../optimization/structure/PolybenchC-Halide/ ../optimization/halide_structure/"
+            "../optimization/parallelism/PolybenchC-Halide/ ../optimization/halide_parallelism/"
+
+            "../optimization/all_hints/PolybenchC-Halide/ ../optimization/halide_all_hints/"
+            "../optimization/choose_hints/PolybenchC-Halide/ ../optimization/halide_choose_hints/"
+
+            "../from_model/PolybenchC-Halide/ ../from_model/halide/"
+        )
+
+        EXO_PAIRS=(
+            "../PolybenchC-Exo/ ../generated/exo/"
+            "../optimization/naive/PolybenchC-Exo/ ../optimization/exo_naive/"
+
+            "../optimization/arithmetic/PolybenchC-Exo/ ../optimization/exo_arithmetic/"
+            "../optimization/cache/PolybenchC-Exo/ ../optimization/exo_cache/"
+            "../optimization/structure/PolybenchC-Exo/ ../optimization/exo_structure/"
+            "../optimization/parallelism/PolybenchC-Exo/ ../optimization/exo_parallelism/"
+
+            "../optimization/all_hints/PolybenchC-Exo/ ../optimization/exo_all_hints/"
+            "../optimization/choose_hints/PolybenchC-Exo/ ../optimization/exo_choose_hints/"
+
+            "../from_model/PolybenchC-Exo/ ../from_model/exo/"
+        )
+
+        if [ "${1:-}" == "do" ]; then
+            DO_RUN=true
+        elif [ "${1:-}" == "check" ]; then
+            DO_RUN=false
+            DIFF_RUN=true
+        elif [ "${1:-}" == "dry" ] || [ -z "${1:-}" ]; then
+            DO_RUN=false
+            DIFF_RUN=false
+            echo "Dry run mode: No files will be replaced." >&2
+        else
+            DO_RUN=false
+            DIFF_RUN=false
+            echo "Dry run mode: No files will be replaced." >&2
+        fi
+
+        case "${2:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${3:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("/generated/") ;;
+          (naive)
+            VERSIONS_TO_RUN=("/optimization/naive/") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("/optimization/arithmetic/") ;;
+          (cache)
+            VERSIONS_TO_RUN=("/optimization/cache/") ;;
+          (structure)
+            VERSIONS_TO_RUN=("/optimization/structure/") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("/optimization/parallelism/") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("/optimization/all_hints/") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("/optimization/choose_hints/") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("/from_model/") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "/generated/"
+                "/optimization/naive/"
+
+                "/optimization/arithmetic/"
+                "/optimization/cache/"
+                "/optimization/structure/"
+                "/optimization/parallelism/"
+
+                "/optimization/all_hints/"
+                "/optimization/choose_hints/"
+
+                "/from_model/"
+            ) ;;
+          (*)
+            echo "Unsupported version: ${3:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        # Handle the repetition number 01-99
+        if [ -n "${4:-}" ]; then
+            # fix 1-9 to 01-09
+            if [[ "${4:-}" =~ ^[1-9]$ ]]; then
+                REPETITION="0${4:-}"
+            elif [[ "${4:-}" =~ ^[0-9][0-9]$ ]]; then
+                REPETITION="${4:-}"
+            else
+                echo "Invalid repetition number: ${4:-}" >&2
+                exit 1
+            fi
+        else
+            REPETITION="01"
+        fi
+
+        ALGORITHM="${5:-all}"
+
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        # C
+        (
+            echo "Processing C framework..." >&2
+            for c_pair in "${C_PAIRS[@]}"; do
+                IFS=' ' read -r -a paths <<< "${c_pair}"
+                framework_path="${paths[0]}"
+                generated_path="${paths[1]}"
+
+                version_matched=false
+                for version in "${VERSIONS_TO_RUN[@]}"; do
+                    if [[ "${generated_path}" == *"${version}"* || "${framework_path}" == *"${version}"* ]]; then
+                        version_matched=true
+                        break
+                    fi
+                done
+
+                if [[ " ${FRAMEWORKS_TO_RUN[*]} " =~ " c " ]] && [[ -d "${GPT_QUERYING_DIR}/${generated_path}" ]] && [ "${version_matched}" == true ]; then
+                    if ! [ -d "${GPT_QUERYING_DIR}/${framework_path}" ]; then
+                        echo "Directory ${GPT_QUERYING_DIR}/${framework_path} does not exist. Skipping." >&2
+                        continue
+                    fi
+
+                    source_files=$(find "${GPT_QUERYING_DIR}/${framework_path}" -mindepth 3 -maxdepth 4 -name "*.c" -and ! -name "CMakeCXXCompilerId.cpp")
+
+                    for file in $source_files; do
+                        base_name="$(basename "${file}" .c)"
+
+                        if [ "${ALGORITHM}" != "all" ] && [[ "${base_name}" != "${ALGORITHM}" ]]; then
+                            continue
+                        fi
+
+                        generated_file="$(find "${GPT_QUERYING_DIR}/${generated_path}" -type d -name "${base_name}-${REPETITION}")"
+
+                        if [ -z "${generated_file}" ]; then
+                            continue
+                        fi
+
+                        generated_file="${generated_file}/code.cpp"
+
+                        if [ -f "${generated_file}" ]; then
+                            if [ "${DO_RUN}" == true ]; then
+                                echo "Replacing ${file} with ${generated_file}" >&2
+                                cp "${generated_file}" "${file}"
+                            elif [ "${DIFF_RUN}" == true ]; then
+                                echo "Diffing ${file} with ${generated_file}" >&2
+                                diff -bu "${file}" "${generated_file}" || true
+                            elif echo "Diffing ${file} with ${generated_file}" >&2 && ! diff -bu "${file}" "${generated_file}" >/dev/null; then
+                                echo "cp \"${generated_file}\" \"${file}\""
+                            fi
+                        else
+                            echo "Generated file ${generated_file} does not exist. Skipping." >&2
+                        fi
+                    done
+                fi
+            done
+        )
+
+        # Noarr
+        (
+            echo "Processing Noarr framework..." >&2
+            for noarr_pair in "${NOARR_PAIRS[@]}"; do
+                IFS=' ' read -r -a paths <<< "${noarr_pair}"
+                framework_path="${paths[0]}"
+                generated_path="${paths[1]}"
+
+                version_matched=false
+                for version in "${VERSIONS_TO_RUN[@]}"; do
+                    if [[ "${generated_path}" == *"${version}"* || "${framework_path}" == *"${version}"* ]]; then
+                        version_matched=true
+                        break
+                    fi
+                done
+
+                if [[ " ${FRAMEWORKS_TO_RUN[*]} " =~ " noarr " ]] && [[ -d "${GPT_QUERYING_DIR}/${generated_path}" ]] && [ "${version_matched}" == true ]; then
+                    if ! [ -d "${GPT_QUERYING_DIR}/${framework_path}" ]; then
+                        echo "Directory ${GPT_QUERYING_DIR}/${framework_path} does not exist. Skipping." >&2
+                        continue
+                    fi
+
+                    source_files=$(find "${GPT_QUERYING_DIR}/${framework_path}" -mindepth 3 -maxdepth 4 -name "*.cpp" -and ! -name "CMakeCXXCompilerId.cpp")
+
+                    for file in $source_files; do
+                        base_name="$(basename "${file}" .cpp)"
+
+                        if [ "${ALGORITHM}" != "all" ] && [[ "${base_name}" != "${ALGORITHM}" ]]; then
+                            continue
+                        fi
+
+                        generated_file="$(find "${GPT_QUERYING_DIR}/${generated_path}" -type d -name "${base_name}-${REPETITION}")"
+
+                        if [ -z "${generated_file}" ]; then
+                            continue
+                        fi
+
+                        generated_file="${generated_file}/code.cpp"
+
+                        if [ -f "${generated_file}" ]; then
+                            if [ "${DO_RUN}" == true ]; then
+                                echo "Replacing ${file} with ${generated_file}" >&2
+                                cp "${generated_file}" "${file}"
+                            elif [ "${DIFF_RUN}" == true ]; then
+                                echo "Diffing ${file} with ${generated_file}" >&2
+                                diff -bu "${file}" "${generated_file}" || true
+                            elif echo "Diffing ${file} with ${generated_file}" >&2 && ! diff -bu "${file}" "${generated_file}" >/dev/null; then
+                                echo "cp \"${generated_file}\" \"${file}\""
+                            fi
+                        else
+                            echo "Generated file ${generated_file} does not exist. Skipping." >&2
+                        fi
+                    done
+                fi
+            done
+        )
+
+        # Halide
+        (
+            echo "Processing Halide framework..." >&2
+            for halide_pair in "${HALIDE_PAIRS[@]}"; do
+                IFS=' ' read -r -a paths <<< "${halide_pair}"
+                framework_path="${paths[0]}"
+                generated_path="${paths[1]}"
+
+                version_matched=false
+                for version in "${VERSIONS_TO_RUN[@]}"; do
+                    if [[ "${generated_path}" == *"${version}"* || "${framework_path}" == *"${version}"* ]]; then
+                        version_matched=true
+                        break
+                    fi
+                done
+
+                if [[ " ${FRAMEWORKS_TO_RUN[*]} " =~ " halide " ]] && [[ -d "${GPT_QUERYING_DIR}/${generated_path}" ]] && [ "${version_matched}" == true ]; then
+                    if ! [ -d "${GPT_QUERYING_DIR}/${framework_path}" ]; then
+                        echo "Directory ${GPT_QUERYING_DIR}/${framework_path} does not exist. Skipping." >&2
+                        continue
+                    fi
+
+                    source_files=$(find "${GPT_QUERYING_DIR}/${framework_path}" -mindepth 3 -maxdepth 4 -name "*.cpp" -and ! -name "CMakeCXXCompilerId.cpp")
+
+                    for file in $source_files; do
+                        base_name="$(basename "${file}" .cpp)"
+
+                        if [ "${ALGORITHM}" != "all" ] && [[ "${base_name}" != "${ALGORITHM}" ]]; then
+                            continue
+                        fi
+
+                        generated_file="$(find "${GPT_QUERYING_DIR}/${generated_path}" -type d -name "${base_name}-${REPETITION}")"
+
+                        if [ -z "${generated_file}" ]; then
+                            continue
+                        fi
+
+                        generated_file="${generated_file}/code.cpp"
+
+                        if [ -f "${generated_file}" ]; then
+                            if [ "${DO_RUN}" == true ]; then
+                                echo "Replacing ${file} with ${generated_file}" >&2
+                                cp "${generated_file}" "${file}"
+                            elif [ "${DIFF_RUN}" == true ]; then
+                                echo "Diffing ${file} with ${generated_file}" >&2
+                                diff -bu "${file}" "${generated_file}" || true
+                            elif echo "Diffing ${file} with ${generated_file}" >&2 && ! diff -bu "${file}" "${generated_file}" >/dev/null; then
+                                echo "cp \"${generated_file}\" \"${file}\""
+                            fi
+                        else
+                            echo "Generated file ${generated_file} does not exist. Skipping." >&2
+                        fi
+                    done
+                fi
+            done
+        )
+
+        # Exo
+        (
+            echo "Processing Exo framework..." >&2
+            for exo_pair in "${EXO_PAIRS[@]}"; do
+                IFS=' ' read -r -a paths <<< "${exo_pair}"
+                framework_path="${paths[0]}"
+                generated_path="${paths[1]}"
+
+                version_matched=false
+                for version in "${VERSIONS_TO_RUN[@]}"; do
+                    if [[ "${generated_path}" == *"${version}"* || "${framework_path}" == *"${version}"* ]]; then
+                        version_matched=true
+                        break
+                    fi
+                done
+
+                if [[ " ${FRAMEWORKS_TO_RUN[*]} " =~ " exo " ]] && [[ -d "${GPT_QUERYING_DIR}/${generated_path}" ]] && [ "${version_matched}" == true ]; then
+                    if ! [ -d "${GPT_QUERYING_DIR}/${framework_path}" ]; then
+                        echo "Directory ${GPT_QUERYING_DIR}/${framework_path} does not exist. Skipping." >&2
+                        continue
+                    fi
+
+                    source_files=$(find "${GPT_QUERYING_DIR}/${framework_path}"/linear-algebra "${GPT_QUERYING_DIR}/${framework_path}"/medley "${GPT_QUERYING_DIR}/${framework_path}"/datamining "${GPT_QUERYING_DIR}/${framework_path}"/stencils -mindepth 2 -maxdepth 3 -name "*.c" -and ! -name "CMakeCXXCompilerId.cpp")
+
+                    for file in $source_files; do
+                        base_name="$(basename "${file}" .c)"
+
+                        if [ "${ALGORITHM}" != "all" ] && [[ "${base_name}" != "${ALGORITHM}" ]]; then
+                            continue
+                        fi
+
+                        generated_file="$(find "${GPT_QUERYING_DIR}/${generated_path}" -type d -name "${base_name}-${REPETITION}")"
+
+                        if [ -z "${generated_file}" ]; then
+                            continue
+                        fi
+
+                        generated_file="${generated_file}/code.cpp"
+
+                        if [ -f "${generated_file}" ]; then
+                            if [ "${DO_RUN}" == true ]; then
+                                echo "Replacing ${file} with ${generated_file}" >&2
+                                cp "${generated_file}" "${file}"
+                            elif [ "${DIFF_RUN}" == true ]; then
+                                echo "Diffing ${file} with ${generated_file}" >&2
+                                diff -bu "${file}" "${generated_file}" || true
+                            elif echo "Diffing ${file} with ${generated_file}" >&2 && ! diff -bu "${file}" "${generated_file}" >/dev/null; then
+                                echo "cp \"${generated_file}\" \"${file}\""
+                            fi
+                        else
+                            echo "Generated file ${generated_file} does not exist. Skipping." >&2
+                        fi
+                    done
+                fi
+            done
+        )
+
+        if ! [ "${DO_RUN}" == true ] && ! [ "${DIFF_RUN}" == true ]; then
+            echo "Dry run complete. No files were replaced." >&2
+            echo "To actually replace files, run: replace_codes do <framework>" >&2
+            echo "To diff files, run: replace_codes check <framework>" >&2
+        fi
+    )
+}
+
+
+invalidate_codes() {
+    # invalidate_codes [mode] [framework] [version] [algorithm]
+    (
+        if [ "${1:-}" == "do" ]; then
+            DO_RUN=true
+        elif [ "${1:-}" == "check" ]; then
+            DO_RUN=false
+            DIFF_RUN=true
+        elif [ "${1:-}" == "dry" ] || [ -z "${1:-}" ]; then
+            DO_RUN=false
+            DIFF_RUN=false
+            echo "Dry run mode: No files will be replaced." >&2
+        else
+            DO_RUN=false
+            DIFF_RUN=false
+            echo "Dry run mode: No files will be replaced." >&2
+        fi
+
+        case "${2:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${3:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "from_model"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${3:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        ALGORITHM="${4:-all}"
+
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        declare -A FRAMEWORK_PATHS=(
+            [c]="PolybenchC-4.2.1"
+            [noarr]="PolybenchC-Noarr"
+            [halide]="PolybenchC-Halide"
+            [exo]="PolybenchC-Exo"
+        )
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../"
+            [naive]="../optimization/naive/"
+
+            [arithmetic]="../optimization/arithmetic/"
+            [cache]="../optimization/cache/"
+            [structure]="../optimization/structure/"
+            [parallelism]="../optimization/parallelism/"
+
+            [all_hints]="../optimization/all_hints/"
+            [choose_hints]="../optimization/choose_hints/"
+
+            [from_model]="../from_model/"
+        )
+
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            base_path="${FRAMEWORK_PATHS[$framework]}"
+
+            for version in "${VERSIONS_TO_RUN[@]}"; do
+                prefix="${VERSION_PREFIXES[$version]}"
+                if [ -z "${prefix}" ]; then
+                    echo "No prefix configured for version ${version}. Skipping." >&2
+                    continue
+                fi
+
+                dir="${prefix}${base_path}"
+
+                if [ -d "${dir}" ]; then
+                    source_files=$(find "${dir}"/linear-algebra "${dir}"/medley "${dir}"/datamining "${dir}"/stencils  -mindepth 2 -maxdepth 3 -name "*.c" -or -name "*.cpp")
+
+                    for file in $source_files; do
+                        base_name="$(basename "${file}" .c)"
+                        base_name="${base_name%.cpp}"
+
+                        if [ "${ALGORITHM}" != "all" ] && [[ "${base_name}" != "${ALGORITHM}" ]]; then
+                            continue
+                        fi
+
+                        if [ "${DO_RUN}" == true ]; then
+                            echo "Invalidating ${file}" >&2
+                            printf "" > "${file}"
+                        elif [ "${DIFF_RUN}" == true ]; then
+                            diff -bu "${file}" <(echo "") || true
+                        elif [[ -s "${file}" ]]; then
+                            echo "printf \"\" > \"${file}\""
+                        fi
+                    done
+                else
+                    echo "Directory ${dir} does not exist. Skipping." >&2
+                fi
+            done
+        done
+    )
+}
+
+
+postprocess_codes() {
+    # postprocess_codes <framework> <version>
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+          (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+          (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+          (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+          (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+          (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+          (*)
+            echo "Unsupported framework: ${1:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${2:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "from_model"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${2:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        if [ "${#FRAMEWORKS_TO_RUN[@]}" -eq 0 ] || [ "${#VERSIONS_TO_RUN[@]}" -eq 0 ]; then
+            exit 1
+        fi
+
+        declare -A FRAMEWORK_PATHS=(
+            [c]="PolybenchC-4.2.1"
+            [noarr]="PolybenchC-Noarr"
+            [halide]="PolybenchC-Halide"
+            [exo]="PolybenchC-Exo"
+        )
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../"
+            [naive]="../optimization/naive/"
+
+            [arithmetic]="../optimization/arithmetic/"
+            [cache]="../optimization/cache/"
+            [structure]="../optimization/structure/"
+            [parallelism]="../optimization/parallelism/"
+
+            [all_hints]="../optimization/all_hints/"
+            [choose_hints]="../optimization/choose_hints/"
+
+            [from_model]="../from_model/"
+        )
+
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            base_path="${FRAMEWORK_PATHS[$framework]}"
+
+            for version in "${VERSIONS_TO_RUN[@]}"; do
+                prefix="${VERSION_PREFIXES[$version]}"
+                if [ -z "${prefix}" ]; then
+                    echo "No prefix configured for version ${version}. Skipping." >&2
+                    continue
+                fi
+
+                dir="${prefix}${base_path}"
+
+                if [ -d "${dir}" ]; then
+                    if [ -f "${dir}/postprocess.sh" ]; then
+                        (
+                            cd "${dir}" || exit 1
+                            ./postprocess.sh
+                        )
+                    else
+                        echo "No postprocess.sh found in ${dir}. Skipping." >&2
+                    fi
+                else
+                    echo "Directory ${dir} does not exist. Skipping." >&2
+                fi
+            done
+        done
+    )
+}
+
+run() {
+    # run <algorithm> <framework> <version> <repetitions>
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        case "${1:-}" in
+        (all|"*"|"")
+            ALGORITHMS_TO_RUN=("*") ;;
+        (*)
+            ALGORITHMS_TO_RUN=("${1:-}") ;;
+        esac
+
+        case "${2:-}" in
+        (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+        (polly)
+            FRAMEWORKS_TO_RUN=("polly") ;;
+        (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+        (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+        (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+        (all|"")
+            FRAMEWORKS_TO_RUN=("c" "polly" "noarr" "halide" "exo") ;;
+
+        (*)
+            echo "Unsupported framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        case "${3:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "from_model"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${3:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        local repetitions="${4:-1}"
+        if ! [[ "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Repetitions must be a positive integer." >&2
+            exit 1
+        fi
+
+        if [ "${#FRAMEWORKS_TO_RUN[@]}" -eq 0 ] || [ "${#VERSIONS_TO_RUN[@]}" -eq 0 ]; then
+            exit 1
+        fi
+
+        declare -A FRAMEWORK_PATHS=(
+            [c]="PolybenchC-4.2.1"
+            [polly]="PolybenchC-Polly"
+            [noarr]="PolybenchC-Noarr"
+            [halide]="PolybenchC-Halide"
+            [exo]="PolybenchC-Exo"
+        )
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../"
+            [naive]="../optimization/naive/"
+
+            [arithmetic]="../optimization/arithmetic/"
+            [cache]="../optimization/cache/"
+            [structure]="../optimization/structure/"
+            [parallelism]="../optimization/parallelism/"
+
+            [all_hints]="../optimization/all_hints/"
+            [choose_hints]="../optimization/choose_hints/"
+
+            [from_model]="../from_model/"
+        )
+
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            base_path="${FRAMEWORK_PATHS[$framework]}"
+
+            for version in "${VERSIONS_TO_RUN[@]}"; do
+                prefix="${VERSION_PREFIXES[$version]}"
+                if [ -z "${prefix}" ]; then
+                    echo "No prefix configured for version ${version}. Skipping." >&2
+                    continue
+                fi
+
+                dir="${prefix}${base_path}"
+
+                if [ -d "${dir}" ]; then
+                    echo "${framework} (${version}):" >&2
+                    (
+                        cd "${dir}" || exit 1
+
+                        if [ ! -d build ]; then
+                            echo "No build directory in ${dir}. Skipping." >&2
+                            exit 0
+                        fi
+
+                        algorithms=$(find build -mindepth 1 -maxdepth 1 -type f -executable -printf "%f\n")
+
+                        for algorithm in $algorithms; do
+                            should_run=false
+                            if [ "${ALGORITHMS_TO_RUN[0]}" = "*" ]; then
+                                should_run=true
+                            else
+                                for allowed in "${ALGORITHMS_TO_RUN[@]}"; do
+                                    if [ "${allowed}" = "${algorithm}" ]; then
+                                        should_run=true
+                                        break
+                                    fi
+                                done
+                            fi
+
+                            if [ "${should_run}" = true ]; then
+                                for ((i=1; i<=repetitions; i++)); do
+                                    printf "%s,%s,%s,%d,%s\n" "${framework}" "${version}" "${algorithm}" "${i}" "$(timeout "${PATIENCE}" "./build/${algorithm}" 2>/dev/null | head -n 1)"
+                                done
+                            fi
+                        done
+                    )
+                else
+                    echo "Directory ${dir} does not exist. Skipping." >&2
+                fi
+            done
+        done
+    )
+}
+
+
+check_translation() {
+    # check_translation <algorithm> <framework> [absolute_tolerance] [relative_tolerance]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        local abs_epsilon_arg="${3:-}"
+        local rel_epsilon_arg="${4:-}"
+        local abs_epsilon
+        local rel_epsilon
+
+        if [ -n "${abs_epsilon_arg}" ]; then
+            abs_epsilon="${abs_epsilon_arg}"
+        else
+            abs_epsilon="${CHECK_TRANSLATION_ABS_EPS:-1e-6}"
+        fi
+
+        if [ -n "${rel_epsilon_arg}" ]; then
+            rel_epsilon="${rel_epsilon_arg}"
+        else
+            rel_epsilon="${CHECK_TRANSLATION_REL_EPS:-0}"
+        fi
+
+        if ! [[ "${abs_epsilon}" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$ ]]; then
+            echo "Absolute tolerance '${abs_epsilon}' is not a valid non-negative number." >&2
+            exit 1
+        fi
+
+        if ! [[ "${rel_epsilon}" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$ ]]; then
+            echo "Relative tolerance '${rel_epsilon}' is not a valid non-negative number." >&2
+            exit 1
+        fi
+
+        local -a ALGORITHMS_TO_RUN
+        case "${1:-}" in
+        (all|"*"|"")
+            ALGORITHMS_TO_RUN=("*") ;;
+        (*)
+            ALGORITHMS_TO_RUN=("${1:-}") ;;
+        esac
+
+        local -a FRAMEWORKS_TO_RUN
+        case "${2:-}" in
+        (polly)
+            FRAMEWORKS_TO_RUN=("polly") ;;
+        (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+        (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+        (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+        (all|"")
+            FRAMEWORKS_TO_RUN=("polly" "noarr" "halide" "exo") ;;
+
+        (*)
+            echo "Unsupported translation framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        if [ "${#FRAMEWORKS_TO_RUN[@]}" -eq 0 ]; then
+            exit 1
+        fi
+
+        local baseline_dir="../PolybenchC-4.2.1"
+        if [ ! -d "${baseline_dir}" ]; then
+            echo "Baseline directory ${baseline_dir} does not exist." >&2
+            exit 1
+        fi
+
+        if [ ! -d "${baseline_dir}/build" ]; then
+            echo "Baseline build directory ${baseline_dir}/build is missing." >&2
+            exit 1
+        fi
+
+        local -a BASELINE_ALGORITHMS=()
+        if ! mapfile -t BASELINE_ALGORITHMS < <(cd "${baseline_dir}" && find build -mindepth 1 -maxdepth 1 -type f -executable -printf "%f\n" | sort); then
+            echo "Unable to enumerate baseline algorithms." >&2
+            exit 1
+        fi
+
+        if [ "${#BASELINE_ALGORITHMS[@]}" -eq 0 ]; then
+            echo "No executable algorithms found in baseline ${baseline_dir}/build." >&2
+            exit 1
+        fi
+
+        declare -A FRAMEWORK_PATHS=(
+            [polly]="../PolybenchC-Polly"
+            [noarr]="../PolybenchC-Noarr"
+            [halide]="../PolybenchC-Halide"
+            [exo]="../PolybenchC-Exo"
+        )
+
+        local overall_status=0
+
+        emit_translation_result() {
+            local framework="$1"
+            local algorithm="$2"
+            local runtime_value="$3"
+            local speedup_value="$4"
+            local status="$5"
+            printf '%s,%s,%s,%s,%s\n' "${framework}" "${algorithm}" "${runtime_value}" "${speedup_value}" "${status}"
+        }
+
+        for algorithm in "${BASELINE_ALGORITHMS[@]}"; do
+            local should_run=false
+            if [ "${ALGORITHMS_TO_RUN[0]}" = "*" ]; then
+                should_run=true
+            else
+                for allowed in "${ALGORITHMS_TO_RUN[@]}"; do
+                    if [ "${allowed}" = "${algorithm}" ]; then
+                        should_run=true
+                        break
+                    fi
+                done
+            fi
+
+            if [ "${should_run}" != true ]; then
+                continue
+            fi
+
+            local at_least_one=false
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                local translation_dir="${FRAMEWORK_PATHS[$framework]}"
+                if [ -d "${translation_dir}" ] && [ -d "${translation_dir}/build" ] && [ -x "${translation_dir}/build/${algorithm}" ]; then
+                    at_least_one=true
+                    break
+                fi
+            done
+
+            if [ "${at_least_one}" = false ]; then
+                echo "No translation frameworks available to run for algorithm ${algorithm}. Skipping." >&2
+                for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                    emit_translation_result "${framework}" "${algorithm}" "" "" "illegal"
+                done
+                continue
+            fi
+
+            local baseline_tmp
+            baseline_tmp="$(mktemp)"
+            local baseline_stdout
+            baseline_stdout="$(mktemp)"
+            (
+                cd "${baseline_dir}" || exit 1
+                if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"; then
+                    echo "Baseline run failed for translation baseline ${algorithm}." >&2
+                    exit 2
+                fi
+            )
+            local baseline_status=$?
+            if [ "${baseline_status}" -ne 0 ]; then
+                echo "Failed to execute baseline for translation ${algorithm}." >&2
+                rm -f "${baseline_tmp}" "${baseline_stdout}"
+                overall_status=1
+                continue
+            fi
+
+            local baseline_time=""
+            if ! baseline_time="$(python3 ../scripts/extract_runtime.py "${baseline_stdout}")"; then
+                echo "Could not extract runtime from baseline stdout for translation ${algorithm}." >&2
+                baseline_time=""
+                overall_status=1
+            fi
+
+            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                local translation_dir="${FRAMEWORK_PATHS[$framework]}"
+                local runtime_value=""
+                local speedup_value=""
+                local status="illegal"
+                local can_run=true
+                local translated_tmp=""
+                local translated_stdout=""
+                local translated_time=""
+
+                if [ -z "${translation_dir}" ]; then
+                    echo "No directory configured for translation framework ${framework}." >&2
+                    can_run=false
+                    overall_status=1
+                fi
+
+                if [ "${can_run}" = true ] && [ ! -d "${translation_dir}" ]; then
+                    echo "Translation directory ${translation_dir} does not exist for framework ${framework}." >&2
+                    can_run=false
+                    overall_status=1
+                fi
+
+                if [ "${can_run}" = true ] && [ ! -d "${translation_dir}/build" ]; then
+                    echo "Build directory ${translation_dir}/build missing for framework ${framework}." >&2
+                    can_run=false
+                    overall_status=1
+                fi
+
+                if [ "${can_run}" = true ] && [ ! -x "${translation_dir}/build/${algorithm}" ]; then
+                    echo "Executable ${translation_dir}/build/${algorithm} missing for framework ${framework}." >&2
+                    can_run=false
+                    overall_status=1
+                fi
+
+                if [ "${can_run}" = true ]; then
+                    translated_tmp="$(mktemp)"
+                    translated_stdout="$(mktemp)"
+                    (
+                        cd "${translation_dir}" || exit 1
+                        if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${translated_stdout}" 2>"${translated_tmp}"; then
+                            echo "Run failed for translation framework ${framework} ${algorithm}." >&2
+                            exit 2
+                        fi
+                    )
+                    local translated_status=$?
+                    case "${translated_status}" in
+                        0)
+                            ;;
+                        124)
+                            status="timeout"
+                            can_run=false
+                            overall_status=1
+                            ;;
+                        *)
+                            echo "Failed to execute translation framework ${framework} for ${algorithm}." >&2
+                            status="illegal"
+                            can_run=false
+                            overall_status=1
+                            ;;
+                    esac
+                fi
+
+                if [ "${can_run}" = true ]; then
+                    if translated_time="$(python3 ../scripts/extract_runtime.py "${translated_stdout}")"; then
+                        runtime_value="${translated_time}"
+                        status="invalid"
+                    else
+                        echo "Could not extract runtime from translation stdout for ${framework} ${algorithm}." >&2
+                        translated_time=""
+                        can_run=false
+                        overall_status=1
+                    fi
+                fi
+
+                if [ "${can_run}" = true ]; then
+                    if python3 ../scripts/compare_translation_stderr.py "${baseline_tmp}" "${translated_tmp}" "${abs_epsilon}" "${rel_epsilon}"; then
+                        status="valid"
+                        if [ -n "${baseline_time}" ] && [ -n "${translated_time}" ]; then
+                            local speedup_output
+                            if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${translated_time}")"; then
+                                local formatted_baseline formatted_translated speedup
+                                local old_ifs="${IFS}"
+                                IFS=' '
+                                read -r formatted_baseline formatted_translated speedup <<<"${speedup_output}"
+                                IFS="${old_ifs}"
+                                runtime_value="${formatted_translated}"
+                                speedup_value="${speedup}"
+                            else
+                                echo "Could not compute speedup for translation ${framework} ${algorithm} (baseline=${baseline_time}, translated=${translated_time})." >&2
+                                overall_status=1
+                            fi
+                        fi
+                    else
+                        echo "Mismatch detected for translation ${framework} ${algorithm} (tolerance ${abs_epsilon} abs, ${rel_epsilon} rel)." >&2
+                        status="invalid"
+                        overall_status=1
+                    fi
+                fi
+
+                if [ -n "${translated_tmp}" ]; then
+                    rm -f "${translated_tmp}" "${translated_stdout}"
+                fi
+
+                emit_translation_result "${framework}" "${algorithm}" "${runtime_value}" "${speedup_value}" "${status}"
+            done
+
+            rm -f "${baseline_tmp}" "${baseline_stdout}"
+        done
+
+        exit "${overall_status}"
+    )
+}
+
+
+check_optimization() {
+    # check_optimization <algorithm> <framework> <version> [absolute_tolerance] [relative_tolerance]
+    (
+        cd "${GPT_QUERYING_DIR}" || exit 1
+
+        local abs_epsilon_arg="${4:-}"
+        local rel_epsilon_arg="${5:-}"
+        local abs_epsilon
+        local rel_epsilon
+
+        if [ -n "${abs_epsilon_arg}" ]; then
+            abs_epsilon="${abs_epsilon_arg}"
+        else
+            abs_epsilon="${CHECK_OPTIMIZATION_ABS_EPS:-1e-6}"
+        fi
+
+        if [ -n "${rel_epsilon_arg}" ]; then
+            rel_epsilon="${rel_epsilon_arg}"
+        else
+            rel_epsilon="${CHECK_OPTIMIZATION_REL_EPS:-0}"
+        fi
+
+        local -a ALGORITHMS_TO_RUN
+        case "${1:-}" in
+        (all|"*"|"")
+            ALGORITHMS_TO_RUN=("*") ;;
+        (*)
+            ALGORITHMS_TO_RUN=("${1:-}") ;;
+        esac
+
+        local -a FRAMEWORKS_TO_RUN
+        case "${2:-}" in
+        (c)
+            FRAMEWORKS_TO_RUN=("c") ;;
+        (noarr)
+            FRAMEWORKS_TO_RUN=("noarr") ;;
+        (halide)
+            FRAMEWORKS_TO_RUN=("halide") ;;
+        (exo)
+            FRAMEWORKS_TO_RUN=("exo") ;;
+
+        (all|"")
+            FRAMEWORKS_TO_RUN=("c" "noarr" "halide" "exo") ;;
+
+        (*)
+            echo "Unsupported framework: ${2:-}" >&2
+            FRAMEWORKS_TO_RUN=() ;;
+        esac
+
+        local -a VERSIONS_TO_RUN
+        case "${3:-}" in
+          (standard|translation)
+            VERSIONS_TO_RUN=("standard") ;;
+          (naive)
+            VERSIONS_TO_RUN=("naive") ;;
+
+          (arithmetic)
+            VERSIONS_TO_RUN=("arithmetic") ;;
+          (cache)
+            VERSIONS_TO_RUN=("cache") ;;
+          (structure)
+            VERSIONS_TO_RUN=("structure") ;;
+          (parallelism)
+            VERSIONS_TO_RUN=("parallelism") ;;
+
+          (all_hints)
+            VERSIONS_TO_RUN=("all_hints") ;;
+          (choose_hints)
+            VERSIONS_TO_RUN=("choose_hints") ;;
+
+          (from_model)
+            VERSIONS_TO_RUN=("from_model") ;;
+
+          (all|"")
+            VERSIONS_TO_RUN=(
+                "standard"
+                "naive"
+
+                "arithmetic"
+                "cache"
+                "structure"
+                "parallelism"
+
+                "all_hints"
+                "choose_hints"
+
+                "from_model"
+            ) ;;
+
+          (*)
+            echo "Unsupported version: ${3:-}" >&2
+            VERSIONS_TO_RUN=() ;;
+        esac
+
+        if [ "${#FRAMEWORKS_TO_RUN[@]}" -eq 0 ] || [ "${#VERSIONS_TO_RUN[@]}" -eq 0 ]; then
+            exit 1
+        fi
+
+        declare -A FRAMEWORK_PATHS=(
+            [c]="PolybenchC-4.2.1"
+            [noarr]="PolybenchC-Noarr"
+            [halide]="PolybenchC-Halide"
+            [exo]="PolybenchC-Exo"
+        )
+
+        declare -A VERSION_PREFIXES=(
+            [standard]="../"
+
+            [naive]="../optimization/naive/"
+
+            [arithmetic]="../optimization/arithmetic/"
+            [cache]="../optimization/cache/"
+            [structure]="../optimization/structure/"
+            [parallelism]="../optimization/parallelism/"
+
+            [all_hints]="../optimization/all_hints/"
+            [choose_hints]="../optimization/choose_hints/"
+
+            [from_model]="../from_model/"
+        )
+
+        local -a OPTIMIZED_VERSIONS=()
+        declare -A seen_versions=()
+        for version in "${VERSIONS_TO_RUN[@]}"; do
+            if [ "${version}" = "standard" ]; then
+                continue
+            fi
+            if [ -z "${seen_versions[$version]:-}" ]; then
+                OPTIMIZED_VERSIONS+=("${version}")
+                seen_versions[$version]=1
+            fi
+        done
+
+        if [ "${#OPTIMIZED_VERSIONS[@]}" -eq 0 ]; then
+            echo "No optimized versions selected for comparison; nothing to check." >&2
+            exit 0
+        fi
+
+        if ! [[ "${abs_epsilon}" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$ ]]; then
+            echo "Tolerance '${abs_epsilon}' is not a valid non-negative number." >&2
+            exit 1
+        fi
+
+        if ! [[ "${rel_epsilon}" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$ ]]; then
+            echo "Relative tolerance '${rel_epsilon}' is not a valid non-negative number." >&2
+            exit 1
+        fi
+
+        local overall_status=0
+
+        emit_optimization_result() {
+            local framework="$1"
+            local version="$2"
+            local algorithm="$3"
+            local runtime_value="$4"
+            local speedup_value="$5"
+            local status="$6"
+            printf '%s,%s,%s,%s,%s,%s\n' "${framework}" "${version}" "${algorithm}" "${runtime_value}" "${speedup_value}" "${status}"
+        }
+
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            local base_path="${FRAMEWORK_PATHS[$framework]}"
+            if [ -z "${base_path}" ]; then
+                echo "No base path configured for framework ${framework}. Skipping." >&2
+                overall_status=1
+                continue
+            fi
+
+            local baseline_dir="${VERSION_PREFIXES[standard]}${FRAMEWORK_PATHS[c]}"
+            if [ -z "${baseline_dir}" ] || [ ! -d "${baseline_dir}" ]; then
+                echo "Baseline directory ${baseline_dir} does not exist for framework ${framework}. Skipping." >&2
+                overall_status=1
+                continue
+            fi
+
+            if [ ! -d "${baseline_dir}/build" ]; then
+                echo "Baseline build directory ${baseline_dir}/build is missing for framework ${framework}. Skipping." >&2
+                overall_status=1
+                continue
+            fi
+
+            local -a VALID_VERSIONS=()
+            declare -A OPTIMIZED_DIRS=()
+            for version in "${OPTIMIZED_VERSIONS[@]}"; do
+                local prefix="${VERSION_PREFIXES[$version]}"
+                if [ -z "${prefix}" ]; then
+                    echo "No prefix configured for version ${version}. Skipping." >&2
+                    overall_status=1
+                    continue
+                fi
+
+                local candidate_dir="${prefix}${base_path}"
+                if [ ! -d "${candidate_dir}" ]; then
+                    echo "Directory ${candidate_dir} does not exist. Skipping version ${version} for framework ${framework}." >&2
+                    continue
+                fi
+
+                if [ ! -d "${candidate_dir}/build" ]; then
+                    echo "Build directory ${candidate_dir}/build missing. Skipping version ${version} for framework ${framework}." >&2
+                    continue
+                fi
+
+                OPTIMIZED_DIRS["$version"]="${candidate_dir}"
+                VALID_VERSIONS+=("${version}")
+            done
+
+            if [ "${#VALID_VERSIONS[@]}" -eq 0 ]; then
+                echo "No optimized builds available for framework ${framework}. Skipping." >&2
+                continue
+            fi
+
+            local -a BASELINE_ALGORITHMS=()
+            if ! mapfile -t BASELINE_ALGORITHMS < <(cd "${baseline_dir}" && find build -mindepth 1 -maxdepth 1 -type f -executable -printf "%f\n" | sort); then
+                echo "Unable to enumerate baseline algorithms for framework ${framework}. Skipping." >&2
+                overall_status=1
+                continue
+            fi
+
+            if [ "${#BASELINE_ALGORITHMS[@]}" -eq 0 ]; then
+                echo "No executable algorithms found in baseline ${baseline_dir}/build. Skipping framework ${framework}." >&2
+                overall_status=1
+                continue
+            fi
+
+            for algorithm in "${BASELINE_ALGORITHMS[@]}"; do
+                local should_run=false
+                if [ "${ALGORITHMS_TO_RUN[0]}" = "*" ]; then
+                    should_run=true
+                else
+                    for allowed in "${ALGORITHMS_TO_RUN[@]}"; do
+                        if [ "${allowed}" = "${algorithm}" ]; then
+                            should_run=true
+                            break
+                        fi
+                    done
+                fi
+
+                if [ "${should_run}" != true ]; then
+                    continue
+                fi
+
+                local at_least_one=false
+                for version in "${VALID_VERSIONS[@]}"; do
+                    local optimized_dir="${OPTIMIZED_DIRS[$version]}"
+                    if [ -x "${optimized_dir}/build/${algorithm}" ]; then
+                        at_least_one=true
+                        break
+                    fi
+                done
+
+                if [ "${at_least_one}" != true ]; then
+                    echo "No optimized versions have executable for ${framework} ${algorithm}. Skipping." >&2
+                    for version in "${VALID_VERSIONS[@]}"; do
+                        emit_optimization_result "${framework}" "${version}" "${algorithm}" "" "" "illegal"
+                    done
+                    overall_status=1
+                    continue
+                fi
+
+                local baseline_tmp
+                baseline_tmp="$(mktemp)"
+                local baseline_stdout
+                baseline_stdout="$(mktemp)"
+                (
+                    cd "${baseline_dir}" || exit 1
+                    if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"; then
+                        echo "Baseline run failed for ${framework} standard ${algorithm}." >&2
+                        exit 2
+                    fi
+                )
+                local baseline_status=$?
+                if [ "${baseline_status}" -ne 0 ]; then
+                    echo "Failed to execute baseline for ${framework} standard ${algorithm}." >&2
+                    rm -f "${baseline_tmp}" "${baseline_stdout}"
+                    overall_status=1
+                    continue
+                fi
+
+                local baseline_time
+                if ! baseline_time="$(python3 ../scripts/extract_runtime.py "${baseline_stdout}")"; then
+                    echo "Could not extract runtime from baseline stdout for ${framework} standard ${algorithm}." >&2
+                    rm -f "${baseline_tmp}" "${baseline_stdout}"
+                    overall_status=1
+                    continue
+                fi
+
+                for version in "${VALID_VERSIONS[@]}"; do
+                    local optimized_dir="${OPTIMIZED_DIRS[$version]}"
+                    local runtime_value=""
+                    local speedup_value=""
+                    local status="illegal"
+                    local can_run=true
+                    local optimized_tmp=""
+                    local optimized_stdout=""
+                    local optimized_time=""
+
+                    if [ -z "${optimized_dir}" ]; then
+                        echo "No directory recorded for version ${version} and framework ${framework}." >&2
+                        can_run=false
+                        overall_status=1
+                    fi
+
+                    if [ "${can_run}" = true ] && [ ! -x "${optimized_dir}/build/${algorithm}" ]; then
+                        echo "Executable ${optimized_dir}/build/${algorithm} missing. Skipping comparison for version ${version}." >&2
+                        can_run=false
+                        overall_status=1
+                    fi
+
+                    if [ "${can_run}" = true ]; then
+                        optimized_tmp="$(mktemp)"
+                        optimized_stdout="$(mktemp)"
+                        (
+                            cd "${optimized_dir}" || exit 1
+                            if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${optimized_stdout}" 2>"${optimized_tmp}"; then
+                                echo "Run failed for ${framework} ${version} ${algorithm}." >&2
+                                exit 2
+                            fi
+                        )
+                        local optimized_status=$?
+                        case "${optimized_status}" in
+                            0)
+                                ;;
+                            124)
+                                status="timeout"
+                                can_run=false
+                                overall_status=1
+                                ;;
+                            *)
+                                echo "Failed to execute optimized version ${version} for ${framework} ${algorithm}." >&2
+                                status="illegal"
+                                can_run=false
+                                overall_status=1
+                                ;;
+                        esac
+                    fi
+
+                    if [ "${can_run}" = true ]; then
+                        if optimized_time="$(python3 ../scripts/extract_runtime.py "${optimized_stdout}")"; then
+                            runtime_value="${optimized_time}"
+                            status="invalid"
+                        else
+                            echo "Could not extract runtime from optimized stdout for ${framework} ${version} ${algorithm}." >&2
+                            can_run=false
+                            overall_status=1
+                        fi
+                    fi
+
+                    if [ "${can_run}" = true ]; then
+                        if python3 ../scripts/compare_translation_stderr.py "${baseline_tmp}" "${optimized_tmp}" "${abs_epsilon}" "${rel_epsilon}"; then
+                            status="valid"
+                            if [ -n "${baseline_time}" ] && [ -n "${optimized_time}" ]; then
+                                local speedup_output
+                                if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${optimized_time}")"; then
+                                    local formatted_baseline formatted_optimized speedup
+                                    local old_ifs="${IFS}"
+                                    IFS=' '
+                                    read -r formatted_baseline formatted_optimized speedup <<<"${speedup_output}"
+                                    IFS="${old_ifs}"
+                                    runtime_value="${formatted_optimized}"
+                                    speedup_value="${speedup}"
+                                else
+                                    echo "Could not compute speedup for ${framework} ${version} ${algorithm} (baseline=${baseline_time}, optimized=${optimized_time})." >&2
+                                    overall_status=1
+                                fi
+                            fi
+                        else
+                            echo "Mismatch detected for ${framework} ${version} ${algorithm} (absolute tolerance ${abs_epsilon}, relative tolerance ${rel_epsilon})." >&2
+                            status="invalid"
+                            overall_status=1
+                        fi
+                    fi
+
+                    if [ -n "${optimized_tmp}" ]; then
+                        rm -f "${optimized_tmp}" "${optimized_stdout}"
+                    fi
+
+                    emit_optimization_result "${framework}" "${version}" "${algorithm}" "${runtime_value}" "${speedup_value}" "${status}"
+                done
+
+                rm -f "${baseline_tmp}" "${baseline_stdout}"
+            done
+        done
+
+        exit "${overall_status}"
+    )
+}
+
+
+commands() {
+    echo "Available commands:"
+    echo "  generate [options]        - Generate code using the main script."
+    echo "  print_cost_estimate       - Print the total cost estimate from generated files."
+    echo "  cleanup [do|check|dry] [framework] [version] - Cleanup the generated code directories."
+    echo "  translate [framework] [provider] [algorithm_category] [options] - Translate code to the specified framework using the language model."
+    echo "  optimize [framework] [version] [provider] [algorithm_category] [options] - Optimize code for the specified framework and version using the language model."
+    echo "  to_model [framework] [provider] [algorithm_category] [options] - Generate model specification for the specified framework using the language model."
+    echo "  from_model [framework] [provider] [algorithm_category] [options] - Generate code from the model specification for the specified framework using the language model."
+    echo "  receive                    - Receive responses from the language model."
+    echo "  patch                     - Apply patches to submodules."
+    echo "  build [framework] [version] [options] - Build framework(s) (c, noarr, halide, exo, all; default: all) across version(s) (standard, naive, arithmetic, cache, structure, parallelism, all_hints, choose_hints, from_model, all; default: all)."
+    echo "  replace_codes [mode] [framework] [version] [repetition] [algorithm] - Replace or diff generated code. Mode: do, check, dry (default: dry). Framework: c, noarr, halide, exo, all (default: all). Version list matches build (default: all). Repetition: integer (default: 1). Algorithm: name or all (default: all)."
+    echo "  invalidate_codes [mode] [framework] [version] [algorithm] - Invalidate or diff generated code. Mode: do, check, dry (default: dry). Framework: c, noarr, halide, exo, all (default: all). Version list matches build (default: all). Algorithm: name or all (default: all)."
+    echo "  postprocess_codes [framework] [version] - Run postprocessing scripts for the specified framework and version. Framework and version lists match build (default: all)."
+    echo "  reload                    - Reload this functions script."
+    echo "  unload                    - Unload this functions script and deactivate the virtual environment."
+    echo "  run [algorithm] [framework] [version] - Execute algorithm(s) (name or all; default: all) on the selected frameworks/versions (same lists as build; defaults: frameworks=all, versions=all)."
+    echo "  check_translation [algorithm] [framework] [absolute_tolerance] [relative_tolerance] - Compare stderr for translated frameworks versus the C baseline using floating tokens; reports status valid/invalid/illegal/timeout (tolerances default to CHECK_TRANSLATION_ABS_EPS, CHECK_TRANSLATION_REL_EPS; or 1e-6 and 0)."
+    echo "  check_optimization [algorithm] [framework] [version] [absolute_tolerance] [relative_tolerance] - Compare stderr for optimized versions versus the standard baseline, reporting speedups when outputs match and status valid/invalid/illegal/timeout (defaults mirror run). Tolerances default to CHECK_OPTIMIZATION_ABS_EPS, CHECK_OPTIMIZATION_REL_EPS or 1e-6 and 0."
+    echo "  commands                  - Show this help message."
+    echo "  functions                 - Alias for commands."
+}
+
+functions() {
+    commands
+}

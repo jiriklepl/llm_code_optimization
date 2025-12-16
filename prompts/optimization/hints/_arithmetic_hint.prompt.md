@@ -1,0 +1,1 @@
+For each arithmetic operation in the code, consider if there are opportunities to reduce the number of operations, replace expensive operations with cheaper ones, or rearrange computations to improve efficiency without changing the results. Also consider defining accumulation variables to minimize repeated calculations and minimize memory accesses.

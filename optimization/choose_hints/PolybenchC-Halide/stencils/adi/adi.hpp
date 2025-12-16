@@ -1,0 +1,1 @@
+../../../../../PolybenchC-Halide/stencils/adi/adi.hpp

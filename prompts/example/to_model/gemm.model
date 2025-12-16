@@ -1,0 +1,14 @@
+domain:
+    i: dim in [0, NI)
+    j: dim in [0, NJ)
+    k: dim in [0, NK)
+data:
+    A[i, k]: in DATA_TYPE = (i, k) -> i * NK + k  # Row-major
+    B[k, j]: in DATA_TYPE = (k, j) -> k * NJ + j  # Row-major
+    C[i, j]: inout DATA_TYPE = (i, j) -> i * NJ + j  # Row-major
+parameters:
+    alpha: DATA_TYPE
+    beta: DATA_TYPE
+computation:
+    for i, j:
+        C[i, j] = beta * C[i, j] + alpha * sum(k, A[i, k] * B[k, j])

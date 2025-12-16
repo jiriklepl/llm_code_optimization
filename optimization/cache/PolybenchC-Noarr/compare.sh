@@ -1,0 +1,1 @@
+../../../PolybenchC-Noarr/compare.sh

@@ -1,0 +1,63 @@
+diff --git a/src/exo/backend/LoopIR_compiler.py b/src/exo/backend/LoopIR_compiler.py
+index 090a215d..c663ddfb 100644
+--- a/src/exo/backend/LoopIR_compiler.py
++++ b/src/exo/backend/LoopIR_compiler.py
+@@ -327,7 +327,7 @@ def run_compile(proc_list, h_file_name: str):
+ 
+     source = f'#include "{h_file_name}"\n\n{body}'
+ 
+-    header_guard = f"{lib_name}_H".upper()
++    header_guard = f"GENERATED_{lib_name}_H".upper()
+     header = f"""
+ #pragma once
+ #ifndef {header_guard}
+diff --git a/src/exo/frontend/pyparser.py b/src/exo/frontend/pyparser.py
+index 8fa30d2d..63f3bad2 100644
+--- a/src/exo/frontend/pyparser.py
++++ b/src/exo/frontend/pyparser.py
+@@ -1147,9 +1147,19 @@ class Parser:
+                     if isinstance(s, pyast.Assign):
+                         rstmts.append(PAST.Assign(nm, idxs, rhs, self.getsrcinfo(s)))
+                     elif isinstance(s, pyast.AugAssign):
+-                        if not isinstance(s.op, pyast.Add):
+-                            self.err(s, "only += reductions currently supported")
+-                        rstmts.append(PAST.Reduce(nm, idxs, rhs, self.getsrcinfo(s)))
++                        if not isinstance(s.op, (pyast.Add, pyast.Sub)):
++                            self.err(s, "only += and -= reductions currently supported")
++                        if isinstance(s.op, pyast.Add):
++                            rstmts.append(PAST.Reduce(nm, idxs, rhs, self.getsrcinfo(s)))
++                        else:
++                            rstmts.append(
++                                PAST.Reduce(
++                                    nm,
++                                    idxs,
++                                    PAST.USub(rhs, self.getsrcinfo(s)),
++                                    self.getsrcinfo(s),
++                                )
++                            )
+                 else:
+                     if is_window:
+                         self.err(
+@@ -1210,9 +1220,19 @@ class Parser:
+                     elif isinstance(s, pyast.Assign):
+                         rstmts.append(UAST.Assign(nm, idxs, rhs, self.getsrcinfo(s)))
+                     elif isinstance(s, pyast.AugAssign):
+-                        if not isinstance(s.op, pyast.Add):
+-                            self.err(s, "only += reductions currently supported")
+-                        rstmts.append(UAST.Reduce(nm, idxs, rhs, self.getsrcinfo(s)))
++                        if not isinstance(s.op, (pyast.Add, pyast.Sub)):
++                            self.err(s, "only += and -= reductions currently supported")
++                        if isinstance(s.op, pyast.Add):
++                            rstmts.append(UAST.Reduce(nm, idxs, rhs, self.getsrcinfo(s)))
++                        else:
++                            rstmts.append(
++                                UAST.Reduce(
++                                    nm,
++                                    idxs,
++                                    UAST.USub(rhs, self.getsrcinfo(s)),
++                                    self.getsrcinfo(s),
++                                )
++                            )
+ 
+             # ----- For Loop parsing
+             elif isinstance(s, pyast.For):

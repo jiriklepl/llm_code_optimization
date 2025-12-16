@@ -1,0 +1,1 @@
+../../PolybenchC-Halide/run_c_algorithm.sh

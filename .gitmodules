@@ -1,0 +1,9 @@
+[submodule "submodules/exo"]
+	path = submodules/exo
+	url = https://github.com/exo-lang/exo
+[submodule "submodules/Halide"]
+	path = submodules/Halide
+	url = https://github.com/halide/Halide
+[submodule "submodules/noarr-structures"]
+	path = submodules/noarr-structures
+	url = https://github.com/paracotoul/noarr-structures

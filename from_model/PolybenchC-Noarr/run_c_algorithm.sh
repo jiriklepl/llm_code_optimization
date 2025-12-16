@@ -1,0 +1,1 @@
+../../PolybenchC-Noarr/run_c_algorithm.sh

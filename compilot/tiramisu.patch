@@ -1,0 +1,37 @@
+diff --git a/benchmarks/compile_and_run_benchmarks.sh b/benchmarks/compile_and_run_benchmarks.sh
+index ced00607..d3745ce5 100755
+--- a/benchmarks/compile_and_run_benchmarks.sh
++++ b/benchmarks/compile_and_run_benchmarks.sh
+@@ -21,7 +21,7 @@ KERNEL=$2
+ source configure_paths.sh
+ 
+ # Add -mavx2 to enable AVX2 (in addition to editing the file src/tiramisu_codegen_halide.cpp
+-CXXFLAGS="-std=c++17 -O3 -fno-rtti -m64 $MPIINCLUDE $MPILIB" # -lmpi-mavx512f 
++CXXFLAGS="-std=c++17 -O3 -DNDEBUG -fno-rtti -march=native -mtune=native $MPIINCLUDE $MPILIB"
+ 
+ # Compile options
+ # - Make ${CXX} dump generated assembly
+@@ -59,6 +59,10 @@ if [ $? -ne 0 ]; then
+ 	exit
+ fi
+ 
++if [ ! -f generated_${KERNEL}.o ] && [ -f ${KERNEL}.o ]; then
++	mv ${KERNEL}.o generated_${KERNEL}.o
++fi
++
+ echo "Compiling ${KERNEL} wrapper"
+ ${CXX} ${LANKA_OPTIONS} $CXXFLAGS ${INCLUDES} ${DEFINED_SIZE} ${KERNEL}_wrapper.cpp   ${LIBRARIES_DIR} ${LIBRARIES} generated_${KERNEL}.o ${LIBRARIES} -o ${KERNEL}_wrapper
+ echo "Running ${KERNEL} wrapper"
+diff --git a/utils/scripts/install_submodules.sh b/utils/scripts/install_submodules.sh
+index 0f1d6f09..52344f19 100755
+--- a/utils/scripts/install_submodules.sh
++++ b/utils/scripts/install_submodules.sh
+@@ -10,7 +10,7 @@ fi
+ 
+ PROJECT_SRC_DIR=`realpath ${1}`
+ CMAKE=cmake
+-CORES=4
++CORES=$(( ($(nproc) + 1) / 2 ))
+ 
+ # For Travis build we skip LLVM installation and use a custom binary.
+ # Second argument specifies the custom path of the LLVM bin dir.

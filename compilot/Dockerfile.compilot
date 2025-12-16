@@ -1,0 +1,55 @@
+# Use Ubuntu 22.04
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y \
+        build-essential git cmake wget python3 python3-pip \
+        libtinfo-dev zlib1g-dev libedit-dev libxml2-dev libncurses5-dev \
+        autoconf automake libtool pkg-config sudo ninja-build unzip \
+        libpng-dev libjpeg-dev && \
+        rm -rf /var/lib/apt/lists/*
+
+# Compile Tiramisu from source
+#  ... clone at commit 041afadf050899e33695600db6241024b2f46088 referenced in the paper
+RUN git clone https://github.com/Tiramisu-Compiler/tiramisu.git tiramisu && \
+    cd tiramisu && \
+    git checkout 041afadf050899e33695600db6241024b2f46088
+
+# Apply patch to fix and speedup Tiramisu build
+COPY tiramisu.patch /tiramisu.patch
+WORKDIR /tiramisu
+RUN git apply /tiramisu.patch
+
+WORKDIR /tiramisu/utils/scripts
+RUN chmod +x install_submodules.sh && \
+    ./install_submodules.sh /tiramisu
+
+RUN cd /tiramisu/3rdParty/Halide/build && \
+    cmake -DCMAKE_INSTALL_PREFIX=/usr/local . && \
+    ninja -j$(nproc) install
+
+WORKDIR /tiramisu/build
+RUN cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DTIRAMISU_ENABLE_AUTO_SCHEDULER=OFF \
+    -DCMAKE_PREFIX_PATH="/tiramisu/3rdParty/isl;/tiramisu/3rdParty/llvm" \
+    -DLLVM_DIR=/tiramisu/3rdParty/llvm/lib/cmake/llvm \
+    && make -j$(nproc) && make install
+
+ENV TIRAMISU_ROOT=/tiramisu
+ENV LD_LIBRARY_PATH=/usr/local/lib:/tiramisu/build:/tiramisu/3rdParty/isl/lib:/tiramisu/3rdParty/llvm/lib
+
+# Prepare the run-all script
+COPY run-all.sh /tiramisu/benchmarks/run-all.sh
+RUN chmod +x /tiramisu/benchmarks/run-all.sh
+
+# WORKDIR /benchmarks
+# RUN wget https://sourceforge.net/projects/polybench/files/polybench-c-4.2.1-beta.tar.gz && \
+#     tar -xzf polybench-c-4.2.1-beta.tar.gz && \
+#     mv polybench-c-4.2.1-beta polybench
+
+WORKDIR /tiramisu
+CMD ["/bin/bash"]

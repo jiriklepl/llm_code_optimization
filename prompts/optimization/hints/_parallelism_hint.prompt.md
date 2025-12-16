@@ -1,0 +1,1 @@
+Identify opportunities for parallelism in the code and use suitable parallel programming constructs to exploit these opportunities. Consider data dependencies and ensure that parallelization does not alter the original functionality of the code. Add necessary synchronization mechanisms if required to maintain correctness.

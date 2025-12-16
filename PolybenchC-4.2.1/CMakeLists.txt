@@ -1,0 +1,46 @@
+cmake_minimum_required(VERSION 3.10)
+
+# set the project name
+project(PolybenchC VERSION 4.2.1 LANGUAGES C)
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED True)
+
+include_directories(utilities)
+
+# enable openmp if available
+add_compile_options(-fopenmp -pthread -march=native -mtune=native -Wfatal-errors)
+
+link_libraries(m)
+link_libraries(gomp)
+
+add_executable(covariance datamining/covariance/covariance.c utilities/polybench.c)
+add_executable(correlation datamining/correlation/correlation.c utilities/polybench.c)
+add_executable(lu linear-algebra/solvers/lu/lu.c utilities/polybench.c)
+add_executable(cholesky linear-algebra/solvers/cholesky/cholesky.c utilities/polybench.c)
+add_executable(gramschmidt linear-algebra/solvers/gramschmidt/gramschmidt.c utilities/polybench.c)
+add_executable(durbin linear-algebra/solvers/durbin/durbin.c utilities/polybench.c)
+add_executable(trisolv linear-algebra/solvers/trisolv/trisolv.c utilities/polybench.c)
+add_executable(ludcmp linear-algebra/solvers/ludcmp/ludcmp.c utilities/polybench.c)
+add_executable(syr2k linear-algebra/blas/syr2k/syr2k.c utilities/polybench.c)
+add_executable(gemm linear-algebra/blas/gemm/gemm.c utilities/polybench.c)
+add_executable(gemver linear-algebra/blas/gemver/gemver.c utilities/polybench.c)
+add_executable(syrk linear-algebra/blas/syrk/syrk.c utilities/polybench.c)
+add_executable(gesummv linear-algebra/blas/gesummv/gesummv.c utilities/polybench.c)
+add_executable(trmm linear-algebra/blas/trmm/trmm.c utilities/polybench.c)
+add_executable(symm linear-algebra/blas/symm/symm.c utilities/polybench.c)
+add_executable(bicg linear-algebra/kernels/bicg/bicg.c utilities/polybench.c)
+add_executable(mvt linear-algebra/kernels/mvt/mvt.c utilities/polybench.c)
+add_executable(atax linear-algebra/kernels/atax/atax.c utilities/polybench.c)
+add_executable(3mm linear-algebra/kernels/3mm/3mm.c utilities/polybench.c)
+add_executable(doitgen linear-algebra/kernels/doitgen/doitgen.c utilities/polybench.c)
+add_executable(2mm linear-algebra/kernels/2mm/2mm.c utilities/polybench.c)
+add_executable(nussinov medley/nussinov/nussinov.c utilities/polybench.c)
+add_executable(floyd-warshall medley/floyd-warshall/floyd-warshall.c utilities/polybench.c)
+add_executable(deriche medley/deriche/deriche.c utilities/polybench.c)
+add_executable(jacobi-1d stencils/jacobi-1d/jacobi-1d.c utilities/polybench.c)
+add_executable(fdtd-2d stencils/fdtd-2d/fdtd-2d.c utilities/polybench.c)
+add_executable(jacobi-2d stencils/jacobi-2d/jacobi-2d.c utilities/polybench.c)
+add_executable(seidel-2d stencils/seidel-2d/seidel-2d.c utilities/polybench.c)
+add_executable(heat-3d stencils/heat-3d/heat-3d.c utilities/polybench.c)
+add_executable(adi stencils/adi/adi.c utilities/polybench.c)

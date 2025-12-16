@@ -1,0 +1,1 @@
+../../PolybenchC-Halide/compare.sh

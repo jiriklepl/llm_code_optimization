@@ -1,0 +1,138 @@
+/**
+ * Exo TRISOLV driver: mirrors PolyBench/C trisolv.c but calls the Exo-generated kernel.
+ */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <math.h>
+
+/* Include polybench common header. */
+#include <polybench.h>
+
+/* Include benchmark-specific header. */
+#include "trisolv.h"
+
+/* Include the Exo-generated kernel header. */
+#include "generated/trisolv/trisolv.h"
+
+
+/* Array initialization. */
+static
+void init_array(int n,
+		DATA_TYPE POLYBENCH_2D(L,N,N,n,n),
+		DATA_TYPE POLYBENCH_1D(x,N,n),
+		DATA_TYPE POLYBENCH_1D(b,N,n))
+{
+  int i, j;
+
+  for (i = 0; i < n; i++)
+    {
+      x[i] = - 999;
+      b[i] =  i ;
+      for (j = 0; j <= i; j++)
+	L[i][j] = (DATA_TYPE) (i+n-j+1)*2/n;
+    }
+}
+
+
+/* DCE code. Must scan the entire live-out data.
+   Can be used also to check the correctness of the output. */
+static
+void print_array(int n,
+		 DATA_TYPE POLYBENCH_1D(x,N,n))
+
+{
+  int i;
+
+  POLYBENCH_DUMP_START;
+  POLYBENCH_DUMP_BEGIN("x");
+  for (i = 0; i < n; i++) {
+    if (i % 20 == 0) fprintf (POLYBENCH_DUMP_TARGET, "\n");
+    fprintf (POLYBENCH_DUMP_TARGET, DATA_PRINTF_MODIFIER, x[i]);
+  }
+  POLYBENCH_DUMP_END("x");
+  POLYBENCH_DUMP_FINISH;
+}
+
+/* Kernel implementation in Exo:
+EXO START
+from __future__ import annotations
+
+from exo import *
+from exo.API_scheduling import *
+from exo.libs.memories import DRAM
+
+# Forward substitution for lower-triangular system L x = b.
+# Optimization strategy:
+#   * Use a private scalar accumulator 'xi' to keep the current x[i] value
+#     in a register and avoid repeated loads/stores of x[i] inside the j-loop.
+#   * Tile and unroll the inner j-loop by a factor of 4 to improve ILP
+#     and enable better vectorization by the C compiler.
+@proc
+def kernel_trisolv(
+    n: size,
+    L: DATA_TYPE[n, n] @ DRAM,
+    x: DATA_TYPE[n] @ DRAM,
+    b: DATA_TYPE[n] @ DRAM,
+):
+    for i in seq(0, n):
+        # Keep the running value of x[i] in a scalar to reduce memory traffic.
+        xi: DATA_TYPE
+        xi = b[i]
+
+        # Accumulate the dot product over the already-computed entries x[0..i-1].
+        for j in seq(0, i):
+            xi = xi - L[i, j] * x[j]
+
+        # Write back the final value of x[i] once and apply the diagonal scaling.
+        x[i] = xi / L[i, i]
+
+# Schedule: tile and unroll the inner j-loop.
+# This preserves the mathematical order of operations while exposing
+# more instruction-level parallelism on the critical inner loop.
+kernel_trisolv = divide_loop(kernel_trisolv, "j", 4, ["jo", "ji"], tail="cut")
+kernel_trisolv = unroll_loop(kernel_trisolv, "ji")
+EXO END
+*/
+
+
+int main(int argc, char** argv)
+{
+  /* Retrieve problem size. */
+  int n = N;
+
+  /* Variable declaration/allocation. */
+  POLYBENCH_2D_ARRAY_DECL(L, DATA_TYPE, N, N, n, n);
+  POLYBENCH_1D_ARRAY_DECL(x, DATA_TYPE, N, n);
+  POLYBENCH_1D_ARRAY_DECL(b, DATA_TYPE, N, n);
+
+
+  /* Initialize array(s). */
+  init_array (n, POLYBENCH_ARRAY(L), POLYBENCH_ARRAY(x), POLYBENCH_ARRAY(b));
+
+  /* Start timer. */
+  polybench_start_instruments;
+
+  /* Run Exo kernel. Flatten views to raw pointers. */
+  kernel_trisolv (/*ctxt=*/NULL,
+                  n,
+                  (DATA_TYPE*)POLYBENCH_ARRAY(L),
+                  (DATA_TYPE*)POLYBENCH_ARRAY(x),
+                  (DATA_TYPE*)POLYBENCH_ARRAY(b));
+
+  /* Stop and print timer. */
+  polybench_stop_instruments;
+  polybench_print_instruments;
+
+  /* Prevent dead-code elimination. All live-out data must be printed
+     by the function call in argument. */
+  polybench_prevent_dce(print_array(n, POLYBENCH_ARRAY(x)));
+
+  /* Be clean. */
+  POLYBENCH_FREE_ARRAY(L);
+  POLYBENCH_FREE_ARRAY(x);
+  POLYBENCH_FREE_ARRAY(b);
+
+  return 0;
+}
