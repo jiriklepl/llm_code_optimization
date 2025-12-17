@@ -695,7 +695,6 @@ def compute_category_shares(
 def plot_category_shares(
     df: pd.DataFrame,
     *,
-    title: str,
     out_path: Path,
     ordering: str,
     tree_order: dict[str, int],
@@ -748,7 +747,6 @@ def plot_category_shares(
     ax.set_xticklabels(algorithms, rotation=45, ha="right")
     ax.set_ylim(0, 100)
     ax.set_ylabel("Share of repetitions (%)")
-    ax.set_title(title)
     ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
 
     fig.tight_layout()
@@ -868,7 +866,6 @@ def plot_algorithms(
     plot_kind: str,
     color_field: str,
     color_label: str,
-    title: str,
     out_path: Path,
     ordering: str,
     tree_order: dict[str, int],
@@ -980,7 +977,6 @@ def plot_algorithms(
     ax.set_xticks(range(len(algorithms)))
     ax.set_xticklabels(algorithms, rotation=45, ha="right")
     ax.set_ylabel("Geom. mean speedup vs translation baseline")
-    ax.set_title(title)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1035,7 +1031,6 @@ def plot_dataset_size_aggregates(
     plot_kind: str,
     color_field: str,
     color_label: str,
-    title: str,
     out_path: Path,
     y_min: float | None,
     y_max: float | None,
@@ -1139,7 +1134,6 @@ def plot_dataset_size_aggregates(
     ax.set_xticks(range(len(dataset_sizes)))
     ax.set_xticklabels(dataset_sizes, rotation=45, ha="right")
     ax.set_ylabel("Geom. mean speedup vs translation baseline")
-    ax.set_title(title)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1341,13 +1335,13 @@ def build_correctness_heatmap_table(
     pivot.index.name = "framework_version"
     pivot.columns.name = "algorithm"
 
-    pivot_with_rows = pivot.assign(mean_valid_pct=pivot.mean(axis=1))
+    pivot_with_rows = pivot.assign(mean_valid=pivot.mean(axis=1))
     col_mean = pivot_with_rows.mean(axis=0)
-    col_mean.name = "mean_valid_pct"
+    col_mean.name = "mean_valid"
     full = pd.concat([pivot_with_rows, col_mean.to_frame().T], axis=0)
 
-    row_labels_with_total = row_labels + ["mean_valid_pct"]
-    col_labels_with_total = algorithms + ["mean_valid_pct"]
+    row_labels_with_total = row_labels + ["mean_valid"]
+    col_labels_with_total = algorithms + ["mean_valid"]
     full = full.reindex(index=row_labels_with_total, columns=col_labels_with_total)
 
     row_frameworks = [row_label_to_fw.get(lbl) for lbl in row_labels] + [None]
@@ -1359,7 +1353,6 @@ def plot_heatmap_table(
     row_labels: Sequence[str],
     col_labels: Sequence[str],
     *,
-    title: str,
     out_path: Path,
     ordering: str,
     tree_categories: dict[str, str],
@@ -1369,6 +1362,8 @@ def plot_heatmap_table(
     value_fmt: str = "{:.2f}",
     value_fmt_overrides: dict[str, str] | None = None,
     cmap_name: str = "YlGnBu",
+    special_rows: Sequence[str] | None = None,
+    special_cols: Sequence[str] | None = None,
 ) -> None:
     """Plot a color-coded heatmap and highlight per-column winners."""
 
@@ -1391,9 +1386,11 @@ def plot_heatmap_table(
     cmap = plt.get_cmap(cmap_name)
     im = ax.imshow(masked, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
 
-    fmt_overrides = {"wins": "{:.0f}"}
+    fmt_overrides = {"wins": "{:.0f}", "mean_valid": "{:.0f}"}
     if value_fmt_overrides:
         fmt_overrides.update(value_fmt_overrides)
+    special_row_set = set(special_rows or [])
+    special_col_set = set(special_cols or [])
     for i, row_label in enumerate(row_labels):
         for j, col_label in enumerate(col_labels):
             val = table.iloc[i, j]
@@ -1408,14 +1405,20 @@ def plot_heatmap_table(
     ax.set_xticklabels(col_labels, rotation=45, ha="right")
     ax.set_yticks(np.arange(len(row_labels)))
     ax.set_yticklabels(row_labels)
-    ax.set_title(title)
 
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label(cbar_label)
 
+    for idx, label in enumerate(col_labels):
+        if label in special_col_set:
+            ax.axvline(idx - 0.5, color="#707070", linestyle="-", linewidth=1.1, zorder=1)
+    for idx, label in enumerate(row_labels):
+        if label in special_row_set:
+            ax.axhline(idx - 0.5, color="#707070", linestyle="-", linewidth=1.1, zorder=1)
+
     main_rows = row_labels[:-1] if len(row_labels) > 1 else row_labels
     for col_idx, col_label in enumerate(col_labels):
-        if col_label in ("geom_mean", "wins", "mean_valid_pct"):
+        if col_label in special_col_set:
             continue
         col_series = table.loc[main_rows, col_label].dropna()
         if col_series.empty:
@@ -1619,6 +1622,27 @@ def best_suffix(best: str) -> str:
     return f"_best-{best}"
 
 
+def append_label_suffix(base: str, label_suffix: str | None) -> str:
+    """Append an optional label suffix to a base filename stem."""
+
+    if not label_suffix:
+        return base
+    cleaned = str(label_suffix).strip("_")
+    return f"{base}_{cleaned}" if cleaned else base
+
+
+def build_label_suffix(*, baseline: str, dataset_sizes: Sequence[str]) -> str:
+    """Construct a suffix describing explicit baseline/dataset selections."""
+
+    parts: list[str] = []
+    if baseline and baseline != BASELINE_FRAMEWORK:
+        parts.append(f"baseline-{baseline}")
+    if dataset_sizes:
+        joined_sizes = "-".join(str(size) for size in dataset_sizes)
+        parts.append(f"datasets-{joined_sizes}")
+    return "__".join(parts)
+
+
 def plot_per_framework_version(
     geom_df: pd.DataFrame,
     *,
@@ -1654,20 +1678,13 @@ def plot_per_framework_version(
             continue
 
         version_label = format_version_label(version)
-        file_name = (
-            f"{label_suffix}_fw-{framework}_ver-{version_label}_{plot_kind}"
-            f"{best_suffix(best)}.{plot_format}"
-        )
-
-        title = (
-            f"Geom. mean speedups – framework {framework}, version {version_label}"
-        )
+        stem = f"fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
             plot_kind=plot_kind,
             color_field="repetition",
             color_label="Repetition",
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -1709,17 +1726,13 @@ def plot_per_version_across_frameworks(
             continue
 
         version_label = format_version_label(version)
-        file_name = (
-            f"{label_suffix}_version-{version_label}_{plot_kind}"
-            f"{best_suffix(best)}.{plot_format}"
-        )
-        title = f"Geom. mean speedups – version {version_label} (color = framework)"
+        stem = f"version-{version_label}_{plot_kind}{best_suffix(best)}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
             plot_kind=plot_kind,
             color_field="framework",
             color_label="Framework",
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -1763,17 +1776,13 @@ def plot_per_framework_across_versions(
 
         if best in ("combine", "smart-combine"):
             data["version_label"] = data["version"].apply(format_version_label)
-        file_name = (
-            f"{label_suffix}_framework-{framework}_versions_{plot_kind}"
-            f"{best_suffix(best)}.{plot_format}"
-        )
-        title = f"Geom. mean speedups – framework {framework} (color = version)"
+        stem = f"framework-{framework}_versions_{plot_kind}{best_suffix(best)}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
             plot_kind=plot_kind,
             color_field="version_label",
             color_label="Version",
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -1811,20 +1820,13 @@ def plot_per_framework_version_agg_algorithms(
 
         aggregated["version_label"] = aggregated["version"].apply(format_version_label)
         version_label = aggregated["version_label"].iloc[0]
-        file_name = (
-            f"{label_suffix}_fw-{framework}_ver-{version_label}_{plot_kind}"
-            f"{best_suffix(best)}_agg-alg.{plot_format}"
-        )
-        title = (
-            f"Geom. mean speedups – framework {framework}, version {version_label} "
-            "(aggregated over algorithms, x = dataset size)"
-        )
+        stem = f"fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}_agg-alg"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
             plot_kind=plot_kind,
             color_field="version_label",
             color_label="Version",
-            title=title,
             out_path=out_dir / file_name,
             y_min=y_min,
             y_max=y_max,
@@ -1856,20 +1858,13 @@ def plot_per_version_across_frameworks_agg_algorithms(
 
         aggregated["version_label"] = aggregated["version"].apply(format_version_label)
         version_label = format_version_label(version)
-        file_name = (
-            f"{label_suffix}_version-{version_label}_frameworks_{plot_kind}"
-            f"{best_suffix(best)}_agg-alg.{plot_format}"
-        )
-        title = (
-            f"Geom. mean speedups – version {version_label} "
-            "(aggregated over algorithms and frameworks, x = dataset size)"
-        )
+        stem = f"version-{version_label}_frameworks_{plot_kind}{best_suffix(best)}_agg-alg"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
             plot_kind=plot_kind,
             color_field="version_label",
             color_label="Version",
-            title=title,
             out_path=out_dir / file_name,
             y_min=y_min,
             y_max=y_max,
@@ -1901,20 +1896,13 @@ def plot_per_framework_across_versions_agg_algorithms(
         if aggregated.empty:
             continue
 
-        file_name = (
-            f"{label_suffix}_framework-{framework}_versions_{plot_kind}"
-            f"{best_suffix(best)}_agg-alg.{plot_format}"
-        )
-        title = (
-            f"Geom. mean speedups – framework {framework} "
-            "(aggregated over algorithms, x = dataset size; color = version)"
-        )
+        stem = f"framework-{framework}_versions_{plot_kind}{best_suffix(best)}_agg-alg"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
             plot_kind=plot_kind,
             color_field="version_label",
             color_label="Version",
-            title=title,
             out_path=out_dir / file_name,
             y_min=y_min,
             y_max=y_max,
@@ -1941,14 +1929,13 @@ def plot_shares_per_framework_version(
         if subset.empty:
             continue
         version_label = format_version_label(version)
-        file_name = f"{label_suffix}_fw-{framework}_ver-{version_label}_shares_thr-{threshold:.2f}.{plot_format}"
-        title = f"Outcome shares – framework {framework}, version {version_label} (thr={threshold:.2f}x)"
+        stem = f"fw-{framework}_ver-{version_label}_shares_thr-{threshold:.2f}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         order_source = geom_df[
             (geom_df["framework"] == framework) & (geom_df["version"] == version)
         ]
         plot_category_shares(
             subset,
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -1977,12 +1964,11 @@ def plot_shares_per_version(
         if subset.empty:
             continue
         version_label = format_version_label(version)
-        file_name = f"{label_suffix}_version-{version_label}_shares_thr-{threshold:.2f}.{plot_format}"
-        title = f"Outcome shares – version {version_label} (thr={threshold:.2f}x)"
+        stem = f"version-{version_label}_shares_thr-{threshold:.2f}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         order_source = geom_df[geom_df["version"] == version]
         plot_category_shares(
             subset,
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -2010,12 +1996,11 @@ def plot_shares_per_framework(
     for framework, subset in shares_df.groupby("framework", dropna=False):
         if subset.empty:
             continue
-        file_name = f"{label_suffix}_framework-{framework}_shares_thr-{threshold:.2f}.{plot_format}"
-        title = f"Outcome shares – framework {framework} (thr={threshold:.2f}x)"
+        stem = f"framework-{framework}_shares_thr-{threshold:.2f}"
+        file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         order_source = geom_df[geom_df["framework"] == framework]
         plot_category_shares(
             subset,
-            title=title,
             out_path=out_dir / file_name,
             ordering=ordering,
             tree_order=tree_order,
@@ -2023,34 +2008,34 @@ def plot_shares_per_framework(
             all_algorithms=all_algorithms,
             ordering_source=order_source if not order_source.empty else subset,
         )
-
-
-def path_label(path: Path) -> str:
-    """Short label for output filenames based on path stem."""
-
-    return path.resolve().name
-
-
 def format_version_label(version: object) -> str:
     """Return a stable string label for version values."""
 
-    if isinstance(version, str):
-        cleaned = version.strip()
-        return cleaned if cleaned else "noversion"
-    if pd.isna(version):
-        return "noversion"
-    text = str(version).strip()
-    return text if text else "noversion"
+    normalized = normalize_version_value(version)
+    return normalized if normalized else "noversion"
 
 
 def normalize_version_value(version: object) -> str:
     """Normalize version values for grouping/joins."""
 
     if isinstance(version, str):
-        return version.strip()
+        cleaned = version.strip()
+        if cleaned == "from_model":
+            return "from_plan"
+        return cleaned
     if pd.isna(version):
         return ""
     return str(version).strip()
+
+
+def normalize_version_column(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Return a copy with 'version' normalized (if present)."""
+
+    if df is None or df.empty or "version" not in df.columns:
+        return df
+    out = df.copy()
+    out["version"] = out["version"].apply(normalize_version_value)
+    return out
 
 
 def extract_standard_runs(translation_times: pd.DataFrame) -> pd.DataFrame:
@@ -2232,6 +2217,11 @@ def main() -> None:
         load_and_aggregate_validation(optimization_val_files) if optimization_val_files else None
     )
 
+    translation_times = normalize_version_column(translation_times)
+    optimization_times = normalize_version_column(optimization_times)
+    translation_validation = normalize_version_column(translation_validation)
+    optimization_validation = normalize_version_column(optimization_validation)
+
     if dataset_size_filter:
         print(f"Filtering to dataset sizes: {', '.join(dataset_size_filter)}")
         translation_times = filter_dataset_sizes(translation_times, dataset_size_filter)
@@ -2301,8 +2291,12 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    label_suffix = f"{path_label(translation_root)}__{path_label(optimization_root)}"
-    csv_path = out_dir / f"speedups_{label_suffix}.csv"
+    label_suffix = build_label_suffix(
+        baseline=args.baseline,
+        dataset_sizes=dataset_size_filter,
+    )
+    csv_stem = append_label_suffix("speedups", label_suffix)
+    csv_path = out_dir / f"{csv_stem}.csv"
     speedups.sort_values(
         ["dataset_size", "algorithm", "framework", "version", "repetition"]
     ).to_csv(csv_path, index=False)
@@ -2315,7 +2309,10 @@ def main() -> None:
         speedups,
         threshold=args.speedup_threshold,
     )
-    outcomes_csv = out_dir / f"outcomes_{label_suffix}_thr-{args.speedup_threshold:.2f}.csv"
+    outcomes_stem = append_label_suffix(
+        f"outcomes_thr-{args.speedup_threshold:.2f}", label_suffix
+    )
+    outcomes_csv = out_dir / f"{outcomes_stem}.csv"
     outcomes.sort_values(["framework", "version", "algorithm", "repetition"]).to_csv(outcomes_csv, index=False)
     print(f"Wrote outcome categories to {outcomes_csv}")
 
@@ -2323,9 +2320,18 @@ def main() -> None:
     shares_fw_ver = compute_category_shares(outcomes_for_shares, ["framework", "version"])
     shares_ver = compute_category_shares(outcomes_for_shares, ["version"])
     shares_fw = compute_category_shares(outcomes_for_shares, ["framework"])
-    shares_fw_ver_csv = out_dir / f"shares_fw_ver_{label_suffix}_thr-{args.speedup_threshold:.2f}.csv"
-    shares_ver_csv = out_dir / f"shares_version_{label_suffix}_thr-{args.speedup_threshold:.2f}.csv"
-    shares_fw_csv = out_dir / f"shares_framework_{label_suffix}_thr-{args.speedup_threshold:.2f}.csv"
+    shares_fw_ver_stem = append_label_suffix(
+        f"shares_fw_ver_thr-{args.speedup_threshold:.2f}", label_suffix
+    )
+    shares_ver_stem = append_label_suffix(
+        f"shares_version_thr-{args.speedup_threshold:.2f}", label_suffix
+    )
+    shares_fw_stem = append_label_suffix(
+        f"shares_framework_thr-{args.speedup_threshold:.2f}", label_suffix
+    )
+    shares_fw_ver_csv = out_dir / f"{shares_fw_ver_stem}.csv"
+    shares_ver_csv = out_dir / f"{shares_ver_stem}.csv"
+    shares_fw_csv = out_dir / f"{shares_fw_stem}.csv"
     shares_fw_ver.sort_values(["framework", "version", "algorithm", "category"]).to_csv(
         shares_fw_ver_csv, index=False
     )
@@ -2382,20 +2388,23 @@ def main() -> None:
         include_standard=args.standard_heat,
     )
     if not heatmap_table.empty:
-        heatmap_csv = out_dir / f"heatmap_speedups_{label_suffix}{best_suffix(args.best)}.csv"
+        heatmap_stem_base = f"heatmap_speedups{best_suffix(args.best)}"
+        heatmap_stem = append_label_suffix(heatmap_stem_base, label_suffix)
+        heatmap_csv = out_dir / f"{heatmap_stem}.csv"
         heatmap_table.to_csv(heatmap_csv)
         print(f"Wrote heatmap table to {heatmap_csv}")
-        heatmap_plot = out_dir / f"heatmap_speedups_{label_suffix}{best_suffix(args.best)}.{plot_format}"
+        heatmap_plot = out_dir / f"{heatmap_stem}.{plot_format}"
         plot_heatmap_table(
             heatmap_table,
             heatmap_rows,
             heatmap_cols,
-            title="Geom. mean speedups by framework/version vs algorithms",
             out_path=heatmap_plot,
             ordering=args.ordering,
             tree_categories=tree_categories,
             algorithms=heatmap_algs,
             row_frameworks=heatmap_row_fws,
+            special_rows=["geom_mean"],
+            special_cols=[col for col in heatmap_cols if col in ("geom_mean", "wins")],
         )
         print(f"Wrote heatmap plot to {heatmap_plot}")
     else:
@@ -2412,17 +2421,16 @@ def main() -> None:
         )
     )
     if not correctness_table.empty:
-        correctness_csv = out_dir / f"heatmap_correctness_{label_suffix}{best_suffix(args.best)}.csv"
+        correctness_stem_base = f"heatmap_correctness{best_suffix(args.best)}"
+        correctness_stem = append_label_suffix(correctness_stem_base, label_suffix)
+        correctness_csv = out_dir / f"{correctness_stem}.csv"
         correctness_table.to_csv(correctness_csv)
         print(f"Wrote correctness heatmap table to {correctness_csv}")
-        correctness_plot = (
-            out_dir / f"heatmap_correctness_{label_suffix}{best_suffix(args.best)}.{plot_format}"
-        )
+        correctness_plot = out_dir / f"{correctness_stem}.{plot_format}"
         plot_heatmap_table(
             correctness_table,
             correctness_rows,
             correctness_cols,
-            title="Valid repetitions (%) by framework/version vs algorithms",
             out_path=correctness_plot,
             ordering=args.ordering,
             tree_categories=tree_categories,
@@ -2430,8 +2438,10 @@ def main() -> None:
             row_frameworks=correctness_row_fws,
             cbar_label="Valid repetitions (%)",
             value_fmt="{:.0f}",
-            value_fmt_overrides={"mean_valid_pct": "{:.0f}"},
+            value_fmt_overrides={"mean_valid": "{:.0f}"},
             cmap_name="Greens",
+            special_rows=["mean_valid"],
+            special_cols=[col for col in correctness_cols if col == "mean_valid"],
         )
         print(f"Wrote correctness heatmap plot to {correctness_plot}")
     else:
