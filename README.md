@@ -1,6 +1,6 @@
 # Experiments with Large Language Models for Code Generation and Optimization
 
-## Getting started
+## 🚀 Getting started
 
 ```bash
 git clone ... replication-package
@@ -9,7 +9,15 @@ cd replication-package
 ./configure.sh
 ```
 
-## Generating the LLM solutions
+## 📋 Prerequisites
+
+(Add prerequisites here)
+
+## 📂 Project Structure
+
+(Add project structure description here)
+
+## 🤖 Generating the LLM solutions
 
 For the initial translation task, run the following set of commands:
 
@@ -63,7 +71,7 @@ And finally, for the tasks involving the abstract optimization tasks:
 ./collect_optimizations.sh from_model
 ```
 
-## Measuring the LLM solutions
+## ⏱️ Measuring the LLM solutions
 
 For measuring the translation task, run the following:
 
@@ -82,7 +90,7 @@ And for the optimizations tasks:
 
 Then collect all folders filled by these scripts into two new folders `TRANSLATION_DIR` and `OPTIMIZATION_DIR` (choose any names)
 
-## Regenerating the results visualizations
+## 📊 Regenerating the results visualizations
 
 To visualize the results, run the following commands (use the names `TRANSLATION_DIR` and `OPTIMIZATION_DIR` from the previous section)
 
@@ -92,7 +100,7 @@ python3 analyze_results.py TRANSLATION_DIR OPTIMIZATION_DIR \
   --ord=tree  --plot=scatter --format=pdf
 ```
 
-## Regenerating the OpenAI request batch files
+## 🔄 Regenerating the OpenAI request batch files
 
 This should be done whenever the files in the [prompts](./prompts) folder are edited. Also, when the [responses/openai/to_model](./responses/openai/to_model) responses change.
 
@@ -101,9 +109,17 @@ This should be done whenever the files in the [prompts](./prompts) folder are ed
 generate
 ```
 
-## Extracting the responses from the batch files
+## 📥 Extracting the responses from the batch files
 
 ```bash
 . functions
 generate --parse
 ```
+
+## 🤝 Contributing
+
+(Add contributing guidelines here)
+
+## 📄 License
+
+(Add license information here)
