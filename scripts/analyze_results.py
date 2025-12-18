@@ -194,7 +194,7 @@ def merge_baseline_tables(primary: pd.DataFrame, fallback: pd.DataFrame | None) 
     return pd.concat([primary, missing], ignore_index=True)
 
 
-def load_and_aggregate_times(paths: Iterable[Path]) -> pd.DataFrame:
+def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataFrame:
     """Concatenate times files and compute mean time per key."""
 
     frames: list[pd.DataFrame] = []
@@ -219,9 +219,11 @@ def load_and_aggregate_times(paths: Iterable[Path]) -> pd.DataFrame:
         if "version" not in df.columns:
             df["version"] = ""
 
-        trimmed = df[
-            ["framework", "version", "algorithm", "repetition", "dataset_size", "time_s"]
-        ].copy()
+        cols_to_keep = ["framework", "version", "algorithm", "repetition", "dataset_size", "time_s"]
+        if "run" in df.columns:
+            cols_to_keep.append("run")
+
+        trimmed = df[cols_to_keep].copy()
 
         trimmed["framework"] = trimmed["framework"].astype(str).str.strip()
         trimmed["version"] = trimmed["version"].astype(str).str.strip()
@@ -229,6 +231,12 @@ def load_and_aggregate_times(paths: Iterable[Path]) -> pd.DataFrame:
         trimmed["dataset_size"] = trimmed["dataset_size"].astype(str).str.strip()
         trimmed["repetition"] = pd.to_numeric(trimmed["repetition"], errors="coerce")
         trimmed["time_s"] = pd.to_numeric(trimmed["time_s"], errors="coerce")
+
+        if "run" in trimmed.columns:
+            trimmed["run"] = pd.to_numeric(trimmed["run"], errors="coerce")
+            if warmup > 0:
+                trimmed = trimmed[trimmed["run"] > warmup]
+            trimmed = trimmed.drop(columns=["run"])
 
         trimmed = trimmed.dropna(subset=["repetition", "time_s", "dataset_size"])
         trimmed = trimmed[trimmed["dataset_size"] != ""]
@@ -2180,6 +2188,12 @@ def main() -> None:
         default="png",
         help="Output format for the generated plots.",
     )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=0,
+        help="Number of initial runs to discard as warmup (default: 0).",
+    )
 
     args = parser.parse_args()
     if args.best_only:
@@ -2207,8 +2221,8 @@ def main() -> None:
     translation_val_files = collect_prefixed_files(translation_root, "validation")
     optimization_val_files = collect_prefixed_files(optimization_root, "validation")
 
-    translation_times = load_and_aggregate_times(translation_time_files)
-    optimization_times = load_and_aggregate_times(optimization_time_files)
+    translation_times = load_and_aggregate_times(translation_time_files, warmup=args.warmup)
+    optimization_times = load_and_aggregate_times(optimization_time_files, warmup=args.warmup)
 
     translation_validation = (
         load_and_aggregate_validation(translation_val_files) if translation_val_files else None
@@ -2221,6 +2235,11 @@ def main() -> None:
     optimization_times = normalize_version_column(optimization_times)
     translation_validation = normalize_version_column(translation_validation)
     optimization_validation = normalize_version_column(optimization_validation)
+
+    # Keep full copies for classification to ensure validity checks consider all dataset sizes
+    translation_times_full = translation_times.copy()
+    optimization_times_full = optimization_times.copy()
+    optimization_validation_full = optimization_validation.copy() if optimization_validation is not None else None
 
     if dataset_size_filter:
         print(f"Filtering to dataset sizes: {', '.join(dataset_size_filter)}")
@@ -2303,12 +2322,18 @@ def main() -> None:
     print(f"Wrote speedup table to {csv_path}")
 
     outcomes = classify_repetition_outcomes(
-        translation_times,
-        optimization_times_raw,
-        optimization_validation,
+        translation_times_full,
+        optimization_times_full,
+        optimization_validation_full,
         speedups,
         threshold=args.speedup_threshold,
     )
+
+    # Filter outcomes to only include repetitions present in the requested dataset sizes
+    if dataset_size_filter:
+        relevant_keys = optimization_times[["framework", "version", "algorithm", "repetition"]].drop_duplicates()
+        outcomes = outcomes.merge(relevant_keys, on=["framework", "version", "algorithm", "repetition"], how="inner")
+
     outcomes_stem = append_label_suffix(
         f"outcomes_thr-{args.speedup_threshold:.2f}", label_suffix
     )
