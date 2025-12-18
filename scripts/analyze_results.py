@@ -2331,8 +2331,12 @@ def main() -> None:
 
     # Filter outcomes to only include repetitions present in the requested dataset sizes
     if dataset_size_filter:
-        relevant_keys = optimization_times[["framework", "version", "algorithm", "repetition"]].drop_duplicates()
-        outcomes = outcomes.merge(relevant_keys, on=["framework", "version", "algorithm", "repetition"], how="inner")
+        relevant_groups = optimization_times[["framework", "version", "algorithm"]].drop_duplicates()
+        if optimization_validation is not None:
+            val_groups = optimization_validation[["framework", "version", "algorithm"]].drop_duplicates()
+            relevant_groups = pd.concat([relevant_groups, val_groups], ignore_index=True).drop_duplicates()
+
+        outcomes = outcomes.merge(relevant_groups, on=["framework", "version", "algorithm"], how="inner")
 
     outcomes_stem = append_label_suffix(
         f"outcomes_thr-{args.speedup_threshold:.2f}", label_suffix
