@@ -763,9 +763,9 @@ def plot_category_shares(
     if ordering == "tree":
         add_category_boundaries(ax, algorithms, tree_categories)
     ax.set_xticks(x_positions)
-    ax.set_xticklabels(algorithms, rotation=45, ha="right")
+    ax.set_xticklabels(algorithms, rotation=45, ha="right", fontsize=12)
     ax.set_ylim(0, 100)
-    ax.set_ylabel("Share of repetitions (%)")
+    ax.set_ylabel("Share of repetitions (%)", fontsize=14)
     ax.legend(loc="best")
 
     fig.tight_layout()
@@ -902,7 +902,7 @@ def plot_algorithms(
     if not algorithms:
         return
 
-    fig, ax = plt.subplots(figsize=(max(8, len(algorithms) * 0.7), 5))
+    fig, ax = plt.subplots(figsize=(max(7, len(algorithms) * 0.6), 5))
 
     palette_values = sorted(df[color_field].unique())
     cmap = plt.get_cmap("tab10")
@@ -994,8 +994,8 @@ def plot_algorithms(
     if ordering == "tree":
         add_category_boundaries(ax, algorithms, tree_categories)
     ax.set_xticks(range(len(algorithms)))
-    ax.set_xticklabels(algorithms, rotation=45, ha="right")
-    ax.set_ylabel("Geom. mean speedup vs translation baseline")
+    ax.set_xticklabels(algorithms, rotation=45, ha="right", fontsize=12)
+    ax.set_ylabel("Geom. mean speedup over baseline", fontsize=14)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1151,8 +1151,8 @@ def plot_dataset_size_aggregates(
 
     ax.axhline(1.0, linestyle="--", color="gray", linewidth=1.0)
     ax.set_xticks(range(len(dataset_sizes)))
-    ax.set_xticklabels(dataset_sizes, rotation=45, ha="right")
-    ax.set_ylabel("Geom. mean speedup vs translation baseline")
+    ax.set_xticklabels(dataset_sizes, rotation=45, ha="right", fontsize=12)
+    ax.set_ylabel("Geom. mean speedup over baseline", fontsize=14)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1241,7 +1241,7 @@ def build_heatmap_table(
         base = best_per_group(base, ["framework", "version", "algorithm"])
 
     base["row_label"] = base.apply(
-        lambda r: f"{r['framework']} - {format_version_label(r['version'])}", axis=1
+        lambda r: f"{r['framework']}: {format_version_label(r['version'])}", axis=1
     )
     row_labels = list(dict.fromkeys(base["row_label"]))
     row_label_to_fw = (
@@ -1399,7 +1399,7 @@ def plot_heatmap_table(
     vmax = float(finite_vals.max()) if finite_vals.size else None
 
     masked = np.ma.masked_invalid(data)
-    fig_width = max(8.0, len(col_labels) * 0.8)
+    fig_width = max(7.0, len(col_labels) * 0.7)
     fig_height = max(4.0, len(row_labels) * 0.5)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
@@ -1419,7 +1419,7 @@ def plot_heatmap_table(
             norm_val = im.norm(val)
             text_color = "black" if norm_val < 0.6 else "white"
             fmt = fmt_overrides.get(col_label, value_fmt)
-            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=10)
+            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=12)
 
     ax.set_xticks(np.arange(len(col_labels)))
     ax.set_xticklabels(col_labels, rotation=45, ha="right", fontsize=12)
@@ -2043,6 +2043,10 @@ def normalize_version_value(version: object) -> str:
         cleaned = version.strip()
         if cleaned == "from_model":
             return "from_plan"
+        if cleaned == "all_hints":
+            return "guided"
+        if cleaned == "choose_hints":
+            return "selection"
         return cleaned
     if pd.isna(version):
         return "standard"
