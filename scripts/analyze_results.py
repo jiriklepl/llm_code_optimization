@@ -2045,15 +2045,20 @@ def normalize_version_value(version: object) -> str:
             return "from_plan"
         return cleaned
     if pd.isna(version):
-        return ""
+        return "standard"
     return str(version).strip()
 
 
 def normalize_version_column(df: pd.DataFrame | None) -> pd.DataFrame | None:
     """Return a copy with 'version' normalized (if present)."""
 
-    if df is None or df.empty or "version" not in df.columns:
+    if df is None or df.empty:
         return df
+    if "version" not in df.columns:
+        out = df.copy()
+        out["version"] = "standard"
+        return out
+
     out = df.copy()
     out["version"] = out["version"].apply(normalize_version_value)
     return out
@@ -2062,8 +2067,12 @@ def normalize_version_column(df: pd.DataFrame | None) -> pd.DataFrame | None:
 def extract_standard_runs(translation_times: pd.DataFrame) -> pd.DataFrame:
     """Return translation rows marked as the standard version."""
 
-    if translation_times.empty or "version" not in translation_times.columns:
+    if translation_times.empty:
         return translation_times.iloc[0:0].copy()
+    if "version" not in translation_times.columns:
+        out = translation_times.copy()
+        out["version"] = "standard"
+        return out
 
     mask = translation_times["version"].apply(normalize_version_value) == "standard"
     return translation_times[mask].copy()
@@ -2287,8 +2296,11 @@ def main() -> None:
     optimization_times = apply_validation_filter(optimization_times, optimization_validation)
 
     standard_runs = extract_standard_runs(translation_times)
+    standard_runs_full = extract_standard_runs(translation_times_full)
+
     optimization_times = append_standard_version(optimization_times, standard_runs)
     optimization_times_raw = append_standard_version(optimization_times_raw, standard_runs)
+    optimization_times_full = append_standard_version(optimization_times_full, standard_runs_full)
 
     baseline_frameworks = {args.baseline}
     if args.baseline != BASELINE_FRAMEWORK:
