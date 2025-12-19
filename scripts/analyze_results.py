@@ -2042,11 +2042,11 @@ def normalize_version_value(version: object) -> str:
     if isinstance(version, str):
         cleaned = version.strip()
         if cleaned == "from_model":
-            return "from_plan"
+            return "plan"
         if cleaned == "all_hints":
             return "guided"
         if cleaned == "choose_hints":
-            return "selection"
+            return "select"
         return cleaned
     if pd.isna(version):
         return "standard"
