@@ -759,7 +759,7 @@ def plot_category_shares(
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(out_path), dpi=200)
+    fig.savefig(str(out_path), dpi=600, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1029,7 +1029,7 @@ def plot_algorithms(
         ax.set_yscale("log")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, dpi=600, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1186,7 +1186,7 @@ def plot_dataset_size_aggregates(
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, dpi=600, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1372,6 +1372,7 @@ def plot_heatmap_table(
     cmap_name: str = "YlGnBu",
     special_rows: Sequence[str] | None = None,
     special_cols: Sequence[str] | None = None,
+    hide_colorbar: bool = False,
 ) -> None:
     """Plot a color-coded heatmap and highlight per-column winners."""
 
@@ -1407,15 +1408,16 @@ def plot_heatmap_table(
             norm_val = im.norm(val)
             text_color = "black" if norm_val < 0.6 else "white"
             fmt = fmt_overrides.get(col_label, value_fmt)
-            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=8)
+            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=10)
 
     ax.set_xticks(np.arange(len(col_labels)))
-    ax.set_xticklabels(col_labels, rotation=45, ha="right")
+    ax.set_xticklabels(col_labels, rotation=45, ha="right", fontsize=12)
     ax.set_yticks(np.arange(len(row_labels)))
-    ax.set_yticklabels(row_labels)
+    ax.set_yticklabels(row_labels, fontsize=12)
 
-    cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label(cbar_label)
+    if not hide_colorbar:
+        cbar = fig.colorbar(im, ax=ax)
+        cbar.set_label(cbar_label)
 
     for idx, label in enumerate(col_labels):
         if label in special_col_set:
@@ -1465,7 +1467,7 @@ def plot_heatmap_table(
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, dpi=600, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -2194,6 +2196,11 @@ def main() -> None:
         default=0,
         help="Number of initial runs to discard as warmup (default: 0).",
     )
+    parser.add_argument(
+        "--hide-colorbar",
+        action="store_true",
+        help="Do not include colorbars in heatmap plots.",
+    )
 
     args = parser.parse_args()
     if args.best_only:
@@ -2434,6 +2441,7 @@ def main() -> None:
             row_frameworks=heatmap_row_fws,
             special_rows=["geom_mean"],
             special_cols=[col for col in heatmap_cols if col in ("geom_mean", "wins")],
+            hide_colorbar=args.hide_colorbar,
         )
         print(f"Wrote heatmap plot to {heatmap_plot}")
     else:
@@ -2471,6 +2479,7 @@ def main() -> None:
             cmap_name="Greens",
             special_rows=["mean_valid"],
             special_cols=[col for col in correctness_cols if col == "mean_valid"],
+            hide_colorbar=args.hide_colorbar,
         )
         print(f"Wrote correctness heatmap plot to {correctness_plot}")
     else:
