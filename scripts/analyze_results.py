@@ -766,7 +766,7 @@ def plot_category_shares(
     ax.set_xticklabels(algorithms, rotation=45, ha="right")
     ax.set_ylim(0, 100)
     ax.set_ylabel("Share of repetitions (%)")
-    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
+    ax.legend(loc="best")
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1009,7 +1009,7 @@ def plot_algorithms(
             )
             for val in palette_values
         ]
-        ax.legend(handles=handles, title=color_label, bbox_to_anchor=(1.02, 1), loc="upper left")
+        ax.legend(handles=handles, title=color_label, loc="best")
     elif plot_kind != "box":
         handles = [
             plt.Line2D(
@@ -1022,7 +1022,7 @@ def plot_algorithms(
             )
             for val in palette_values
         ]
-        ax.legend(handles=handles, title=color_label, bbox_to_anchor=(1.02, 1), loc="upper left")
+        ax.legend(handles=handles, title=color_label, loc="best")
 
     bottom = y_min
     top = y_max
@@ -1166,7 +1166,7 @@ def plot_dataset_size_aggregates(
             )
             for val in color_values
         ]
-        ax.legend(handles=handles, title=color_label, bbox_to_anchor=(1.02, 1), loc="upper left")
+        ax.legend(handles=handles, title=color_label, loc="best")
     elif plot_kind != "box":
         handles = [
             plt.Line2D(
@@ -1179,7 +1179,7 @@ def plot_dataset_size_aggregates(
             )
             for val in color_values
         ]
-        ax.legend(handles=handles, title=color_label, bbox_to_anchor=(1.02, 1), loc="upper left")
+        ax.legend(handles=handles, title=color_label, loc="best")
 
     bottom = y_min
     top = y_max
