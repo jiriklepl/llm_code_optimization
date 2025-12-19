@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Convert raw timing CSVs into the optimization times/validation format.
+"""Convert raw timing CSVs into the translation times/validation format.
 
 The input is expected to have a header like:
     name;type;execution_times_ms
@@ -29,7 +29,6 @@ TIMES_HEADER = [
 
 VALIDATION_HEADER = [
     "framework",
-    "version",
     "algorithm",
     "time_s",
     "speedup",
@@ -69,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Adapt raw timing CSV (name;type;execution_times_ms) into "
-            "results/optimization/<run_id>/times_<size>.csv and "
+            "results/translation/<run_id>/times_<size>.csv and "
             "validation_<size>.csv"
         )
     )
@@ -77,8 +76,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("results/optimization"),
-        help="Base directory for generated files (default: results/optimization).",
+        default=Path("results/translation"),
+        help="Base directory for generated files (default: results/translation).",
     )
     parser.add_argument(
         "--run-id",
@@ -160,7 +159,6 @@ def write_validation(entries: Iterable[Entry], output_path: Path) -> None:
             writer.writerow(
                 {
                     "framework": "tiramisu",
-                    "version": "standard",
                     "algorithm": entry.algorithm_normalized,
                     "time_s": best_time,
                     "speedup": "",
