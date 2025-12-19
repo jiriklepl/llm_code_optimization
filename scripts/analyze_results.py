@@ -59,7 +59,7 @@ def collect_prefixed_files(root: Path, prefix: str) -> list[Path]:
     return files
 
 
-def normalize_dataset_size_args(values: Sequence[str] | None) -> list[str]:
+def normalize_cli_args(values: Sequence[str] | None) -> list[str]:
     """Normalize dataset-size CLI inputs into a unique, ordered list."""
 
     if not values:
@@ -85,6 +85,17 @@ def filter_dataset_sizes(
         return df
     allowed = {str(size) for size in allowed_sizes}
     return df[df["dataset_size"].astype(str).isin(allowed)].copy()
+
+
+def filter_frameworks(
+    df: pd.DataFrame | None, disallowed_frameworks: Sequence[str] | None
+) -> pd.DataFrame | None:
+    """Keep only rows whose framework does not match the disallowed list."""
+
+    if df is None or not disallowed_frameworks or "framework" not in df.columns:
+        return df
+    disallowed = {str(framework) for framework in disallowed_frameworks}
+    return df[~df["framework"].astype(str).isin(disallowed)].copy()
 
 
 def select_best_standard_baseline(
@@ -2132,6 +2143,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--no-framework",
+        action="append",
+        help=(
+            "Do not process the specified frameworks (e.g., tiramisu)"
+        )
+    )
+    parser.add_argument(
         "--best",
         choices=["none", "pick", "combine", "smart-combine"],
         default="none",
@@ -2206,7 +2224,8 @@ def main() -> None:
     if args.best_only:
         args.best = "pick"
 
-    dataset_size_filter = normalize_dataset_size_args(args.dataset_sizes)
+    dataset_size_filter = normalize_cli_args(args.dataset_sizes)
+    framework_filter = normalize_cli_args(args.no_framework)
 
     translation_root = Path(args.translation_path)
     optimization_root = Path(args.optimization_path)
@@ -2242,6 +2261,13 @@ def main() -> None:
     optimization_times = normalize_version_column(optimization_times)
     translation_validation = normalize_version_column(translation_validation)
     optimization_validation = normalize_version_column(optimization_validation)
+
+    if framework_filter:
+        print(f"Filtering out frameworks: {', '.join(framework_filter)}")
+        translation_times = filter_frameworks(translation_times, framework_filter)
+        optimization_times = filter_frameworks(optimization_times, framework_filter)
+        translation_validation = filter_frameworks(translation_validation, framework_filter)
+        optimization_validation = filter_frameworks(optimization_validation, framework_filter)
 
     # Keep full copies for classification to ensure validity checks consider all dataset sizes
     translation_times_full = translation_times.copy()
