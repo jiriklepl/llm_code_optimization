@@ -1,0 +1,40 @@
+Exo non-valid translations: 12
+Noarr non-valid translations: 30
+Halide non-valid translations: 67
+Total output tokens (including reasoning) in C all-hints optimization: 2758961
+Number of C all-hints optimization requests: 150
+Average output tokens per algorithm: 91965
+Total output tokens (including reasoning) in C choose-hints optimization: 2699056
+Number of C choose-hints optimization requests: 150
+Average output tokens per algorithm: 89968
+Algorithm            Reasoning  Min_Reasoning Max_Reasoning Output     Total     
+trmm                 124116     21129      29935      10630      134746    
+ludcmp               109300     14547      35273      11654      120954    
+symm                 104188     14787      25987      11964      116152    
+syr2k                103759     14729      26309      10209      113968    
+deriche              102356     17196      24594      13295      115651    
+covariance           98339      15940      24299      11491      109830    
+lu                   90577      12821      26552      9822       100399    
+gemver               90529      15411      21606      12943      103472    
+mvt                  89098      14431      22828      11726      100824    
+seidel-2d            88752      11794      19765      10064      98816     
+gramschmidt          88000      14614      24706      11000      99000     
+correlation          81861      10505      19555      12215      94076     
+adi                  81272      12272      26028      12451      93723     
+cholesky             80963      12863      19184      8855       89818     
+atax                 80294      12205      22812      10010      90304     
+nussinov             79148      13948      19810      9211       88359     
+syrk                 75502      11982      20082      8047       83549     
+jacobi-2d            74824      10220      17424      9759       84583     
+2mm                  74791      9366       19384      13599      88390     
+bicg                 72553      11835      16678      10045      82598     
+fdtd-2d              72242      11299      16063      12826      85068     
+3mm                  71735      9439       22368      15394      87129     
+floyd-warshall       70835      9412       22559      8300       79135     
+heat-3d              70268      12798      15483      11790      82058     
+doitgen              69441      9404       16473      10647      80088     
+jacobi-1d            63927      9386       16843      7618       71545     
+gemm                 60459      9614       14764      11089      71548     
+durbin               59756      9644       14088      7999       67755     
+gesummv              54943      8797       12611      9225       64168     
+trisolv              53253      7592       13126      8002       61255     

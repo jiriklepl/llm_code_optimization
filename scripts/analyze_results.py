@@ -871,7 +871,7 @@ def compute_speedups(
     return result[column_order]
 
 
-def jitter_positions(count: int, spread: float = 0.35) -> np.ndarray:
+def jitter_positions(count: int, spread: float = 0.3) -> np.ndarray:
     """Small symmetric offsets used for plot separation."""
 
     if count <= 1:
@@ -896,13 +896,16 @@ def plot_algorithms(
 ):
     """Plot per-algorithm values with scatter, bar, or box style."""
 
+    df = df.copy()
+    df["framework"] = df["framework"].apply(normalize_framework_value)
+
     algorithms = compute_algorithm_order(
         df["algorithm"].unique(), df, ordering, tree_order, all_algorithms=all_algorithms
     )
     if not algorithms:
         return
 
-    fig, ax = plt.subplots(figsize=(max(7, len(algorithms) * 0.6), 5))
+    fig, ax = plt.subplots(figsize=(max(6, len(algorithms) * 0.5), 5))
 
     palette_values = sorted(df[color_field].unique())
     cmap = plt.get_cmap("tab10")
@@ -984,7 +987,7 @@ def plot_algorithms(
             ax.scatter(
                 x_positions,
                 y_values,
-                s=40,
+                s=60,
                 c=[color_map[val] for val in subset[color_field]],
                 edgecolors="black",
                 linewidths=0.4,
@@ -1232,6 +1235,7 @@ def build_heatmap_table(
 
     base = base_df.copy()
     base["version_norm"] = base["version"].apply(normalize_version_value)
+    base["framework"] = base["framework"].apply(normalize_framework_value)
     if not include_standard:
         base = base[base["version_norm"] != "standard"].copy()
     if base.empty:
@@ -1312,6 +1316,7 @@ def build_correctness_heatmap_table(
 
     base = outcomes.copy()
     base["version_norm"] = base["version"].apply(normalize_version_value)
+    base["framework"] = base["framework"].apply(normalize_framework_value)
     if not include_standard:
         base = base[base["version_norm"] != "standard"].copy()
     if base.empty:
@@ -1329,7 +1334,7 @@ def build_correctness_heatmap_table(
     )
 
     grouped["row_label"] = grouped.apply(
-        lambda r: f"{r['framework']} - {format_version_label(r['version'])}", axis=1
+        lambda r: f"{r['framework']}: {format_version_label(r['version'])}", axis=1
     )
     row_labels = list(dict.fromkeys(grouped["row_label"]))
     row_label_to_fw = (
@@ -1378,7 +1383,7 @@ def plot_heatmap_table(
     algorithms: Sequence[str],
     row_frameworks: Sequence[str | None],
     cbar_label: str = "Geom. mean speedup vs translation baseline",
-    value_fmt: str = "{:.2f}",
+    value_fmt: str = "{:.1f}",
     value_fmt_overrides: dict[str, str] | None = None,
     cmap_name: str = "YlGnBu",
     special_rows: Sequence[str] | None = None,
@@ -1399,8 +1404,8 @@ def plot_heatmap_table(
     vmax = float(finite_vals.max()) if finite_vals.size else None
 
     masked = np.ma.masked_invalid(data)
-    fig_width = max(7.0, len(col_labels) * 0.7)
-    fig_height = max(4.0, len(row_labels) * 0.5)
+    fig_width = max(6, len(col_labels) * 0.6)
+    fig_height = max(4.5, len(row_labels) * 0.5)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     cmap = plt.get_cmap(cmap_name)
@@ -2042,15 +2047,38 @@ def normalize_version_value(version: object) -> str:
     if isinstance(version, str):
         cleaned = version.strip()
         if cleaned == "from_model":
-            return "plan"
+            return "FromPlan"
         if cleaned == "all_hints":
-            return "guided"
+            return "AllHints"
         if cleaned == "choose_hints":
-            return "select"
+            return "ChooseHints"
+        if cleaned == "naive":
+            return "Naive"
         return cleaned
     if pd.isna(version):
         return "standard"
     return str(version).strip()
+
+
+def normalize_framework_value(framework: object) -> str:
+    """Normalize framework values for grouping/joins."""
+
+    if isinstance(framework, str):
+        cleaned = framework.strip()
+        if cleaned == "exo":
+            return "Exo"
+        if cleaned == "tiramisu":
+            return "Tiramisu"
+        if cleaned == "c":
+            return "C"
+        if cleaned == "noarr":
+            return "Noarr"
+        if cleaned == "halide":
+            return "Halide"
+        return cleaned
+    if pd.isna(framework):
+        return "standard"
+    return str(framework).strip()
 
 
 def normalize_version_column(df: pd.DataFrame | None) -> pd.DataFrame | None:
