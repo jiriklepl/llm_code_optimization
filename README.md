@@ -1,6 +1,6 @@
-# Shifting Automated Code Optimization Paradigms with Large Language Models
+# Artifact: Shifting Automated Code Optimization Paradigms with Large Language Models
 
-This repository contains the replication package for the paper: Shifting Automated Code Optimization Paradigms with Large Language Models, submitted to ISC 2026.
+This repository contains the replication package for the paper "Shifting Automated Code Optimization Paradigms with Large Language Models" submitted to HLPP 2026. The package includes all necessary code, scripts, and instructions to reproduce the results presented in the paper.
 
 ```bibtex
 @inproceedings{ TODO }
@@ -212,4 +212,4 @@ This populates the following folders with the extracted [responses](./responses)
 
 ## 📄 License
 
-This project will be made available under the MIT License after the review process is complete.
+This project is available under the MIT License. See the [LICENSE](./LICENSE) file for more details.
