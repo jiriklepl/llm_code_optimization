@@ -61,7 +61,15 @@ class BestCandidateKey:
 
 
 VALID_STATUS_TRUE = {"valid", "true"}
-VALID_STATUS_FALSE = {"invalid", "illegal", "timeout", "false"}
+VALID_STATUS_FALSE = {
+    "invalid",
+    "illegal",
+    "timeout",
+    "false",
+    "validity_error",
+    "runtime_error",
+    "compile_error",
+}
 
 
 def is_valid_status(value: str | None) -> bool:
@@ -73,6 +81,12 @@ def is_valid_status(value: str | None) -> bool:
     if status in VALID_STATUS_FALSE:
         return False
     return False
+
+
+def get_validation_status(row: Mapping[str, str]) -> str | None:
+    """Return status from either the new status column or the legacy valid column."""
+
+    return row.get("status") or row.get("valid")
 
 
 def extract_dataset_size(path: Path) -> Optional[str]:
@@ -195,7 +209,7 @@ def load_validation_reports(
                         f"Invalid repetition value {repetition_str!r} in {csv_path} line {line_number}"
                     ) from exc
 
-                is_valid = is_valid_status(row.get("valid"))
+                is_valid = is_valid_status(get_validation_status(row))
                 key = ValidationReportKey(
                     framework=framework,
                     algorithm=algorithm,

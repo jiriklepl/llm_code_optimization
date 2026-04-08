@@ -15,20 +15,60 @@ from matplotlib.patches import Rectangle
 
 
 BASELINE_FRAMEWORK = "c"
-STATUS_TO_BOOL = {
-    "valid": True,
-    "true": True,
-    "invalid": False,
-    "false": False,
-    "illegal": False,
-    "timeout": False,
-}
+VALID_STATUS_TRUE = {"valid", "true"}
+VALIDITY_FAILURE_STATUSES = {"invalid", "false", "validity_error"}
+RUNTIME_FAILURE_STATUSES = {"runtime_error", "timeout"}
+COMPILE_FAILURE_STATUSES = {"compile_error", "illegal"}
+
+
+def normalize_status_column(series: pd.Series) -> pd.Series:
+    """Normalize status strings into a lowercase series."""
+
+    return series.fillna("").astype(str).str.strip().str.lower()
 
 
 def normalize_valid_column(series: pd.Series) -> pd.Series:
     """Convert status strings to booleans, defaulting to False."""
 
-    return series.astype(str).str.lower().map(STATUS_TO_BOOL).fillna(False)
+    return normalize_status_column(series).isin(VALID_STATUS_TRUE)
+
+
+def get_validation_status_column(df: pd.DataFrame) -> str | None:
+    """Return the preferred validation status column name."""
+
+    if "status" in df.columns:
+        return "status"
+    if "valid" in df.columns:
+        return "valid"
+    return None
+
+
+def combine_status_values(values: pd.Series) -> str:
+    """Collapse multiple status values for one key into a stable pipe-separated token list."""
+
+    statuses = sorted({value for value in normalize_status_column(values) if value})
+    return "|".join(statuses)
+
+
+def collect_status_tokens(values: pd.Series) -> set[str]:
+    """Expand pipe-separated status strings into a token set."""
+
+    tokens: set[str] = set()
+    for raw in normalize_status_column(values):
+        if not raw:
+            continue
+        tokens.update(part for part in raw.split("|") if part)
+    return tokens
+
+
+def classify_invalid_statuses(statuses: set[str], has_any_time: bool) -> str:
+    """Map validation failure statuses onto outcome categories."""
+
+    if statuses & (VALIDITY_FAILURE_STATUSES | RUNTIME_FAILURE_STATUSES):
+        return "invalid_algorithm"
+    if statuses & COMPILE_FAILURE_STATUSES:
+        return "invalid_code"
+    return "invalid_algorithm" if has_any_time else "invalid_code"
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -280,7 +320,7 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
 
 
 def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
-    """Concatenate validation files and collapse validity flags per key."""
+    """Concatenate validation files and collapse status flags per key."""
 
     frames: list[pd.DataFrame] = []
     for path in paths:
@@ -296,15 +336,18 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
             if inferred_size is not None:
                 df.loc[df["dataset_size"] == "", "dataset_size"] = inferred_size
 
-        required = {"framework", "algorithm", "repetition", "valid"}
+        status_column = get_validation_status_column(df)
+        required = {"framework", "algorithm", "repetition"}
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f"{path} is missing required columns: {sorted(missing)}")
+        if status_column is None:
+            raise ValueError(f"{path} is missing required columns: ['status']")
 
         if "version" not in df.columns:
             df["version"] = np.nan
 
-        keep_cols = ["framework", "version", "algorithm", "repetition", "dataset_size", "valid"]
+        keep_cols = ["framework", "version", "algorithm", "repetition", "dataset_size", status_column]
         has_time_column = "time_s" in df.columns
         if has_time_column:
             keep_cols.append("time_s")
@@ -318,7 +361,10 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
         trimmed["dataset_size"] = trimmed["dataset_size"].astype(str).str.strip()
         trimmed["repetition"] = pd.to_numeric(trimmed["repetition"], errors="coerce")
 
-        trimmed["valid"] = normalize_valid_column(trimmed["valid"])
+        trimmed["status"] = normalize_status_column(trimmed[status_column])
+        trimmed["valid"] = normalize_valid_column(trimmed[status_column])
+        if status_column != "status":
+            trimmed = trimmed.drop(columns=[status_column])
 
         trimmed["has_time_s"] = False
         if has_time_column:
@@ -349,7 +395,11 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
     ]
     grouped = (
         combined.groupby(key_cols, as_index=False)
-        .agg(valid=("valid", "all"), has_time_s=("has_time_s", "any"))
+        .agg(
+            status=("status", combine_status_values),
+            valid=("valid", "all"),
+            has_time_s=("has_time_s", "any"),
+        )
     )
     return grouped
 
@@ -597,8 +647,11 @@ def classify_repetition_outcomes(
                 ]
             has_invalid_validation = False
             has_validation_time = False
+            validation_statuses: set[str] = set()
             if validation_norm is not None and not val_rows.empty:
                 has_invalid_validation = not val_rows["valid"].all()
+                if "status" in val_rows.columns:
+                    validation_statuses = collect_status_tokens(val_rows["status"])
                 if "has_time_s" in val_rows.columns:
                     has_validation_time = bool(val_rows["has_time_s"].any())
                 elif "time_s" in val_rows.columns:
@@ -614,7 +667,7 @@ def classify_repetition_outcomes(
             has_any_time = has_time_reports or has_validation_time
 
             if has_invalid_validation:
-                category = "invalid_algorithm" if has_any_time else "invalid_code"
+                category = classify_invalid_statuses(validation_statuses, has_any_time)
                 records.append(
                     {
                         "framework": fw,

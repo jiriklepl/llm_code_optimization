@@ -32,7 +32,7 @@ VALIDATION_HEADER = [
     "algorithm",
     "time_s",
     "speedup",
-    "valid",
+    "status",
     "repetition",
     "dataset_size",
 ]
@@ -162,7 +162,7 @@ def write_validation(entries: Iterable[Entry], output_path: Path) -> None:
                     "algorithm": entry.algorithm_normalized,
                     "time_s": best_time,
                     "speedup": "",
-                    "valid": "valid",
+                    "status": "valid",
                     "repetition": 1,
                     "dataset_size": entry.dataset_size,
                 }

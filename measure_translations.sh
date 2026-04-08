@@ -99,7 +99,7 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 	output_file="${results_dir}/output_${DATASET_SIZE}.out"
 
 	if ! [[ -f "${validation_file}" ]]; then
-		echo "framework,algorithm,time_s,speedup,valid,repetition,dataset_size" > "${validation_file}"
+		echo "framework,algorithm,time_s,speedup,status,repetition,dataset_size" > "${validation_file}"
 	fi
 
 	if ! [[ -f "${times_file}" ]]; then
@@ -145,8 +145,8 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 					continue
 				fi
 
-				valid_column=$(echo "${validation}" | awk -F, '{print $5}')
-				if [[ ${valid_column} == "true" || ${valid_column} == "valid" ]]; then
+				status_column=$(echo "${validation}" | awk -F, '{print $5}')
+				if [[ ${status_column} == "true" || ${status_column} == "valid" ]]; then
 					run "${algorithm}" "${framework}" "translation" "${actual_runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"'"}' | tee -a "${times_file}"
 				fi
 			done

@@ -1583,7 +1583,15 @@ run() {
 
                             if [ "${should_run}" = true ]; then
                                 for ((i=1; i<=repetitions; i++)); do
-                                    printf "%s,%s,%s,%d,%s\n" "${framework}" "${version}" "${algorithm}" "${i}" "$(timeout "${PATIENCE}" "./build/${algorithm}" 2>/dev/null | head -n 1)"
+                                    local runtime_output=""
+                                    runtime_output="$(timeout "${PATIENCE}" "./build/${algorithm}" 2>/dev/null | head -n 1)"
+                                    local run_status=$?
+                                    if [ "${run_status}" -eq 124 ]; then
+                                        echo "${framework} (${version}) ${algorithm} timed out after ${PATIENCE} seconds." >&2
+                                    elif [ "${run_status}" -ne 0 ]; then
+                                        echo "${framework} (${version}) ${algorithm} failed during execution." >&2
+                                    fi
+                                    printf "%s,%s,%s,%d,%s\n" "${framework}" "${version}" "${algorithm}" "${i}" "${runtime_output}"
                                 done
                             fi
                         done
@@ -1729,7 +1737,7 @@ check_translation() {
             if [ "${at_least_one}" = false ]; then
                 echo "No translation frameworks available to run for algorithm ${algorithm}. Skipping." >&2
                 for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
-                    emit_translation_result "${framework}" "${algorithm}" "" "" "illegal"
+                    emit_translation_result "${framework}" "${algorithm}" "" "" "compile_error"
                 done
                 continue
             fi
@@ -1740,14 +1748,20 @@ check_translation() {
             baseline_stdout="$(mktemp)"
             (
                 cd "${baseline_dir}" || exit 1
-                if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"; then
-                    echo "Baseline run failed for translation baseline ${algorithm}." >&2
-                    exit 2
-                fi
+                timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"
             )
             local baseline_status=$?
             if [ "${baseline_status}" -ne 0 ]; then
-                echo "Failed to execute baseline for translation ${algorithm}." >&2
+                local baseline_failure_status="runtime_error"
+                if [ "${baseline_status}" -eq 124 ]; then
+                    echo "Baseline translation run for ${algorithm} timed out after ${PATIENCE} seconds." >&2
+                    baseline_failure_status="timeout"
+                else
+                    echo "Failed to execute baseline for translation ${algorithm}." >&2
+                fi
+                for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+                    emit_translation_result "${framework}" "${algorithm}" "" "" "${baseline_failure_status}"
+                done
                 rm -f "${baseline_tmp}" "${baseline_stdout}"
                 overall_status=1
                 continue
@@ -1764,7 +1778,7 @@ check_translation() {
                 local translation_dir="${FRAMEWORK_PATHS[$framework]}"
                 local runtime_value=""
                 local speedup_value=""
-                local status="illegal"
+                local status="compile_error"
                 local can_run=true
                 local translated_tmp=""
                 local translated_stdout=""
@@ -1799,23 +1813,22 @@ check_translation() {
                     translated_stdout="$(mktemp)"
                     (
                         cd "${translation_dir}" || exit 1
-                        if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${translated_stdout}" 2>"${translated_tmp}"; then
-                            echo "Run failed for translation framework ${framework} ${algorithm}." >&2
-                            exit 2
-                        fi
+                        timeout "${PATIENCE}" "./build/${algorithm}" >"${translated_stdout}" 2>"${translated_tmp}"
                     )
                     local translated_status=$?
                     case "${translated_status}" in
                         0)
+                            status="valid"
                             ;;
                         124)
+                            echo "Translation framework ${framework} for ${algorithm} timed out after ${PATIENCE} seconds." >&2
                             status="timeout"
                             can_run=false
                             overall_status=1
                             ;;
                         *)
                             echo "Failed to execute translation framework ${framework} for ${algorithm}." >&2
-                            status="illegal"
+                            status="runtime_error"
                             can_run=false
                             overall_status=1
                             ;;
@@ -1825,10 +1838,10 @@ check_translation() {
                 if [ "${can_run}" = true ]; then
                     if translated_time="$(python3 ../scripts/extract_runtime.py "${translated_stdout}")"; then
                         runtime_value="${translated_time}"
-                        status="invalid"
                     else
                         echo "Could not extract runtime from translation stdout for ${framework} ${algorithm}." >&2
                         translated_time=""
+                        status="unknown_error"
                         can_run=false
                         overall_status=1
                     fi
@@ -1836,7 +1849,6 @@ check_translation() {
 
                 if [ "${can_run}" = true ]; then
                     if python3 ../scripts/compare_translation_stderr.py "${baseline_tmp}" "${translated_tmp}" "${abs_epsilon}" "${rel_epsilon}"; then
-                        status="valid"
                         if [ -n "${baseline_time}" ] && [ -n "${translated_time}" ]; then
                             local speedup_output
                             if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${translated_time}")"; then
@@ -1848,13 +1860,14 @@ check_translation() {
                                 runtime_value="${formatted_translated}"
                                 speedup_value="${speedup}"
                             else
+                                status="speedup_error"
                                 echo "Could not compute speedup for translation ${framework} ${algorithm} (baseline=${baseline_time}, translated=${translated_time})." >&2
                                 overall_status=1
                             fi
                         fi
                     else
                         echo "Mismatch detected for translation ${framework} ${algorithm} (tolerance ${abs_epsilon} abs, ${rel_epsilon} rel)." >&2
-                        status="invalid"
+                        status="validity_error"
                         overall_status=1
                     fi
                 fi
@@ -2127,7 +2140,7 @@ check_optimization() {
                 if [ "${at_least_one}" != true ]; then
                     echo "No optimized versions have executable for ${framework} ${algorithm}. Skipping." >&2
                     for version in "${VALID_VERSIONS[@]}"; do
-                        emit_optimization_result "${framework}" "${version}" "${algorithm}" "" "" "illegal"
+                        emit_optimization_result "${framework}" "${version}" "${algorithm}" "" "" "compile_error"
                     done
                     overall_status=1
                     continue
@@ -2139,14 +2152,20 @@ check_optimization() {
                 baseline_stdout="$(mktemp)"
                 (
                     cd "${baseline_dir}" || exit 1
-                    if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"; then
-                        echo "Baseline run failed for ${framework} standard ${algorithm}." >&2
-                        exit 2
-                    fi
+                    timeout "${PATIENCE}" "./build/${algorithm}" >"${baseline_stdout}" 2>"${baseline_tmp}"
                 )
                 local baseline_status=$?
                 if [ "${baseline_status}" -ne 0 ]; then
-                    echo "Failed to execute baseline for ${framework} standard ${algorithm}." >&2
+                    local baseline_failure_status="runtime_error"
+                    if [ "${baseline_status}" -eq 124 ]; then
+                        echo "Baseline ${framework} standard run for ${algorithm} timed out after ${PATIENCE} seconds." >&2
+                        baseline_failure_status="timeout"
+                    else
+                        echo "Failed to execute baseline for ${framework} standard ${algorithm}." >&2
+                    fi
+                    for version in "${VALID_VERSIONS[@]}"; do
+                        emit_optimization_result "${framework}" "${version}" "${algorithm}" "" "" "${baseline_failure_status}"
+                    done
                     rm -f "${baseline_tmp}" "${baseline_stdout}"
                     overall_status=1
                     continue
@@ -2164,7 +2183,7 @@ check_optimization() {
                     local optimized_dir="${OPTIMIZED_DIRS[$version]}"
                     local runtime_value=""
                     local speedup_value=""
-                    local status="illegal"
+                    local status="compile_error"
                     local can_run=true
                     local optimized_tmp=""
                     local optimized_stdout=""
@@ -2187,23 +2206,22 @@ check_optimization() {
                         optimized_stdout="$(mktemp)"
                         (
                             cd "${optimized_dir}" || exit 1
-                            if ! timeout "${PATIENCE}" "./build/${algorithm}" >"${optimized_stdout}" 2>"${optimized_tmp}"; then
-                                echo "Run failed for ${framework} ${version} ${algorithm}." >&2
-                                exit 2
-                            fi
+                            timeout "${PATIENCE}" "./build/${algorithm}" >"${optimized_stdout}" 2>"${optimized_tmp}"
                         )
                         local optimized_status=$?
                         case "${optimized_status}" in
                             0)
+                                status="valid"
                                 ;;
                             124)
+                                echo "${framework} ${version} for ${algorithm} timed out after ${PATIENCE} seconds." >&2
                                 status="timeout"
                                 can_run=false
                                 overall_status=1
                                 ;;
                             *)
                                 echo "Failed to execute optimized version ${version} for ${framework} ${algorithm}." >&2
-                                status="illegal"
+                                status="runtime_error"
                                 can_run=false
                                 overall_status=1
                                 ;;
@@ -2213,9 +2231,9 @@ check_optimization() {
                     if [ "${can_run}" = true ]; then
                         if optimized_time="$(python3 ../scripts/extract_runtime.py "${optimized_stdout}")"; then
                             runtime_value="${optimized_time}"
-                            status="invalid"
                         else
                             echo "Could not extract runtime from optimized stdout for ${framework} ${version} ${algorithm}." >&2
+                            status="unknown_error"
                             can_run=false
                             overall_status=1
                         fi
@@ -2223,7 +2241,6 @@ check_optimization() {
 
                     if [ "${can_run}" = true ]; then
                         if python3 ../scripts/compare_translation_stderr.py "${baseline_tmp}" "${optimized_tmp}" "${abs_epsilon}" "${rel_epsilon}"; then
-                            status="valid"
                             if [ -n "${baseline_time}" ] && [ -n "${optimized_time}" ]; then
                                 local speedup_output
                                 if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${optimized_time}")"; then
@@ -2235,13 +2252,14 @@ check_optimization() {
                                     runtime_value="${formatted_optimized}"
                                     speedup_value="${speedup}"
                                 else
+                                    status="speedup_error"
                                     echo "Could not compute speedup for ${framework} ${version} ${algorithm} (baseline=${baseline_time}, optimized=${optimized_time})." >&2
                                     overall_status=1
                                 fi
                             fi
                         else
                             echo "Mismatch detected for ${framework} ${version} ${algorithm} (absolute tolerance ${abs_epsilon}, relative tolerance ${rel_epsilon})." >&2
-                            status="invalid"
+                            status="validity_error"
                             overall_status=1
                         fi
                     fi
@@ -2280,8 +2298,8 @@ commands() {
     echo "  reload                    - Reload this functions script."
     echo "  unload                    - Unload this functions script and deactivate the virtual environment."
     echo "  run [algorithm] [framework] [version] - Execute algorithm(s) (name or all; default: all) on the selected frameworks/versions (same lists as build; defaults: frameworks=all, versions=all)."
-    echo "  check_translation [algorithm] [framework] [absolute_tolerance] [relative_tolerance] - Compare stderr for translated frameworks versus the C baseline using floating tokens; reports status valid/invalid/illegal/timeout (tolerances default to CHECK_TRANSLATION_ABS_EPS, CHECK_TRANSLATION_REL_EPS; or 1e-6 and 0)."
-    echo "  check_optimization [algorithm] [framework] [version] [absolute_tolerance] [relative_tolerance] - Compare stderr for optimized versions versus the standard baseline, reporting speedups when outputs match and status valid/invalid/illegal/timeout (defaults mirror run). Tolerances default to CHECK_OPTIMIZATION_ABS_EPS, CHECK_OPTIMIZATION_REL_EPS or 1e-6 and 0."
+    echo "  check_translation [algorithm] [framework] [absolute_tolerance] [relative_tolerance] - Compare stderr for translated frameworks versus the C baseline using floating tokens; reports status valid/validity_error/compile_error/runtime_error/timeout (tolerances default to CHECK_TRANSLATION_ABS_EPS, CHECK_TRANSLATION_REL_EPS; or 1e-6 and 0)."
+    echo "  check_optimization [algorithm] [framework] [version] [absolute_tolerance] [relative_tolerance] - Compare stderr for optimized versions versus the standard baseline, reporting speedups when outputs match and status valid/validity_error/compile_error/runtime_error/timeout (defaults mirror run). Tolerances default to CHECK_OPTIMIZATION_ABS_EPS, CHECK_OPTIMIZATION_REL_EPS or 1e-6 and 0."
     echo "  commands                  - Show this help message."
     echo "  functions                 - Alias for commands."
 }
