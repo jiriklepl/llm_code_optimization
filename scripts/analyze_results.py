@@ -397,7 +397,7 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
         combined.groupby(key_cols, as_index=False)
         .agg(
             status=("status", combine_status_values),
-            valid=("valid", "all"),
+            valid=(get_validation_status_column(combined), "all"),
             has_time_s=("has_time_s", "any"),
         )
     )

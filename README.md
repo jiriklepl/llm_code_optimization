@@ -44,7 +44,7 @@ The project is organized as follows:
 - [gpt-querying](./gpt-querying): Contains the code and scripts for querying the LLMs. The OpenAI API should be stored at [gpt-querying/.env](./gpt-querying/.env).
 - [requests](./requests): Contains the batch request files sent to the LLMs.
 - [responses](./responses): Contains the responses received from the LLMs.
-- [results](./results): Contains the measurement results and visualizations.
+- [results](./results): Contains the measurement results and visualizations (note that only `results/*/20260408` contain detailed validity results in the included csv files).
   - [results/translation](./results/translation): Contains the results of the code translation tasks.
   - [results/optimization](./results/optimization): Contains the results of the optimization tasks.
   - [results/plots](./results/plots): Contains the plots generated from the results.
