@@ -19,11 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 CURRENT_DIR = Path.cwd()
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_REQUESTS_FILE = SCRIPT_DIR / "requests.jsonl"
-try:
-    DEFAULT_RESPONSES_DIR = ".." / (SCRIPT_DIR.parent / "responses" / "openai").relative_to(CURRENT_DIR.parent)
-except ValueError:
-    DEFAULT_RESPONSES_DIR = SCRIPT_DIR.parent / "responses" / "openai"
+DEFAULT_PROVIDER = os.getenv("GPT_QUERYING_PROVIDER", "gpt51")
 DEFAULT_COMPLETION_WINDOW = "24h"
 DEFAULT_API_BASE = "https://api.openai.com/v1"
 
@@ -64,6 +60,22 @@ def save_requests(filepath: Path, records: Iterable[dict[str, Any]]) -> None:
 
 def iso_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def provider_env_prefix(provider: str) -> str:
+    return provider.upper().replace("-", "_")
+
+
+def default_requests_file(provider: str) -> Path:
+    return SCRIPT_DIR / f"requests.{provider}.jsonl"
+
+
+def default_responses_dir(provider: str) -> Path:
+    responses_dir = SCRIPT_DIR.parent / "responses" / provider
+    try:
+        return Path("..") / responses_dir.relative_to(CURRENT_DIR.parent)
+    except ValueError:
+        return responses_dir
 
 
 def get_attr(obj: Any, key: str) -> Any:
@@ -110,7 +122,7 @@ class BatchRecord:
         return data
 
 
-class OpenAIBatchClient:
+class CompatibleBatchClient:
     def __init__(self, api_key: str, api_base: str | None = DEFAULT_API_BASE, beta_header: str | None = None) -> None:
         default_headers: dict[str, str] | None = None
         if beta_header:
@@ -166,12 +178,13 @@ class OpenAIBatchClient:
 
 
 def submit_request(
-    client: OpenAIBatchClient,
+    client: CompatibleBatchClient,
     jsonl_path: Path,
     requests_file: Path,
     responses_dir: Path,
     completion_window: str,
     metadata: dict[str, Any] | None,
+    provider: str,
 ) -> BatchRecord:
     if not jsonl_path.exists():
         raise FileNotFoundError(f"Request file not found: {jsonl_path}")
@@ -184,10 +197,10 @@ def submit_request(
     jsonl_path = jsonl_path.resolve()
 
     parent_name = jsonl_path.parent.name
-    if jsonl_path.parent.parent.name == "openai" and jsonl_path.parent.parent.parent.name == "requests":
+    if jsonl_path.parent.parent.name == provider and jsonl_path.parent.parent.parent.name == "requests":
         responses_dir = responses_dir / parent_name
 
-    logger.info("Uploading %s to OpenAI Files API.", jsonl_path)
+    logger.info("Uploading %s to %s Files API.", jsonl_path, provider)
     file_response = client.upload_batch_file(jsonl_path)
     file_id = get_attr(file_response, "id")
     logger.info("Uploaded file. file_id=%s", file_id)
@@ -229,7 +242,7 @@ def submit_request(
 
 
 def receive_batches(
-    client: OpenAIBatchClient,
+    client: CompatibleBatchClient,
     requests_file: Path,
     responses_dir: Path,
 ) -> None:
@@ -306,26 +319,36 @@ def parse_metadata(metadata_argument: str | None) -> dict[str, Any] | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Submit and retrieve OpenAI Batch API jobs.")
-    parser.add_argument("--api-key", help="OpenAI API key. Overrides OPENAI_API_KEY environment variable.")
+    parser = argparse.ArgumentParser(description="Submit and retrieve gpt51 batch API jobs.")
+    parser.add_argument("--provider", default=DEFAULT_PROVIDER, help="Provider label used for batch tracking and default response paths.")
+    parser.add_argument("--api-key", help="API key. Overrides provider-specific environment variables.")
     parser.add_argument("--api-base", help="Override the API base URL (default: https://api.openai.com/v1).")
-    parser.add_argument("--beta-header", help="Optional value for the OpenAI-Beta header.")
+    parser.add_argument("--beta-header", help="Optional value for the batch beta header.")
     parser.add_argument("--request", type=Path, help="Path to a JSONL file to submit to the Batch API.")
     parser.add_argument("--receive", action="store_true", help="Attempt to download completed batches listed in the requests file.")
-    parser.add_argument("--requests-file", type=Path, default=DEFAULT_REQUESTS_FILE, help="File tracking outstanding batch IDs.")
-    parser.add_argument("--responses-dir", type=Path, default=DEFAULT_RESPONSES_DIR, help="Directory to store downloaded batch outputs.")
+    parser.add_argument("--requests-file", type=Path, help="File tracking outstanding batch IDs. Defaults to gpt-querying/requests.<provider>.jsonl.")
+    parser.add_argument("--responses-dir", type=Path, help="Directory to store downloaded batch outputs. Defaults to ../responses/<provider>.")
     parser.add_argument("--completion-window", default=DEFAULT_COMPLETION_WINDOW, help="Completion window requested for new batches.")
     parser.add_argument("--metadata", help="Optional JSON object to attach as batch metadata.")
 
     return parser
 
 
-def resolve_api_key(cli_key: str | None) -> str:
+def resolve_api_key(provider: str, cli_key: str | None) -> str:
     load_dotenv(dotenv_path=SCRIPT_DIR / ".env", override=False)
 
-    api_key = cli_key or os.getenv("OPENAI_API_KEY")
+    prefix = provider_env_prefix(provider)
+    api_key = (
+        cli_key
+        or os.getenv(f"{prefix}_API_KEY")
+        or os.getenv("LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+    )
     if not api_key:
-        raise SystemExit("OpenAI API key not provided. Use --api-key or set OPENAI_API_KEY in the environment/.env.")
+        raise SystemExit(
+            f"API key not provided for provider '{provider}'. "
+            f"Use --api-key or set {prefix}_API_KEY, LLM_API_KEY, or OPENAI_API_KEY in the environment/.env."
+        )
 
     return api_key
 
@@ -337,27 +360,43 @@ def main() -> None:
     if not args.request and not args.receive:
         parser.error("Specify at least one action: --request PATH and/or --receive.")
 
-    api_key = resolve_api_key(args.api_key)
+    requests_file = args.requests_file or default_requests_file(args.provider)
+    responses_dir = args.responses_dir or default_responses_dir(args.provider)
+    api_key = resolve_api_key(args.provider, args.api_key)
     metadata = parse_metadata(args.metadata)
 
-    api_base = args.api_base or os.getenv("OPENAI_API_BASE") or DEFAULT_API_BASE
-    client = OpenAIBatchClient(api_key=api_key, api_base=api_base, beta_header=args.beta_header)
+    provider_prefix = provider_env_prefix(args.provider)
+    api_base = (
+        args.api_base
+        or os.getenv(f"{provider_prefix}_API_BASE")
+        or os.getenv("LLM_API_BASE")
+        or os.getenv("OPENAI_API_BASE")
+        or DEFAULT_API_BASE
+    )
+    beta_header = (
+        args.beta_header
+        or os.getenv(f"{provider_prefix}_BETA_HEADER")
+        or os.getenv("LLM_BETA_HEADER")
+        or os.getenv("OPENAI_BETA_HEADER")
+    )
+    client = CompatibleBatchClient(api_key=api_key, api_base=api_base, beta_header=beta_header)
 
     if args.request:
         submit_request(
             client=client,
             jsonl_path=args.request,
-            requests_file=args.requests_file,
-            responses_dir=args.responses_dir,
+            requests_file=requests_file,
+            responses_dir=responses_dir,
             completion_window=args.completion_window,
             metadata=metadata,
+            provider=args.provider,
         )
 
     if args.receive:
         receive_batches(
             client=client,
-            requests_file=args.requests_file,
-            responses_dir=args.responses_dir,
+            requests_file=requests_file,
+            responses_dir=responses_dir,
         )
 
 

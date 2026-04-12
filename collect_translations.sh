@@ -4,7 +4,7 @@ START_PATTERN="${1:-}"
 
 frameworks=("noarr" "halide" "exo")
 
-provider=openai
+provider="${GPT_QUERYING_PROVIDER:-gpt51}"
 
 sleep_interval=$((60 * 2 / 2))
 
@@ -51,7 +51,7 @@ for option in $options; do
     translate "$framework" "$provider" "full_part$part"
 	sleep "$sleep_interval"
 
-	pending=$(receive 2>&1 | grep -oE "([0-9]+|No) pending" | cut -d' ' -f1)
+	pending=$(receive "$provider" 2>&1 | grep -oE "([0-9]+|No) pending" | cut -d' ' -f1)
 	if ! [ "$pending" = "No" ]; then
 	    echo "Pending translations: $pending"
 	fi

@@ -5,7 +5,7 @@ START_PATTERN="${2:-}"
 
 frameworks=("c" "noarr" "halide" "exo")
 
-provider=openai
+provider="${GPT_QUERYING_PROVIDER:-gpt51}"
 
 if [ -z "$version" ]; then
 	echo "Usage: $0 <version> [start_pattern]"
@@ -60,7 +60,7 @@ for option in $options; do
 	optimize "$framework" "$version" "$provider" "full_part$part"
 	sleep "$sleep_interval"
 
-	pending=$(receive 2>&1 | grep -oE "([0-9]+|No) pending" | cut -d' ' -f1)
+	pending=$(receive "$provider" 2>&1 | grep -oE "([0-9]+|No) pending" | cut -d' ' -f1)
 	if ! [ "$pending" = "No" ]; then
         echo "Pending batches: $pending"
     fi
