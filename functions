@@ -17,6 +17,7 @@ export NOARR_STRUCTURES_DIR
 export EXO_DIR
 
 export PATIENCE
+export GPT_QUERYING_PROVIDER="${GPT_QUERYING_PROVIDER:-openai}"
 
 (
     cd "${GPT_QUERYING_DIR}" || exit 1
@@ -39,6 +40,37 @@ export PATIENCE
 
 # shellcheck disable=SC1091
 source "${GPT_QUERYING_DIR}/.venv/bin/activate"
+
+
+resolve_provider() {
+    if [ -n "${1:-}" ]; then
+        printf '%s\n' "$1"
+    else
+        printf '%s\n' "${GPT_QUERYING_PROVIDER}"
+    fi
+}
+
+
+request_file_for() {
+    local provider="$1"
+    local task="$2"
+    local request_name="$3"
+
+    printf '../requests/%s/%s/%s.jsonl\n' "$provider" "$task" "$request_name"
+}
+
+
+submit_batch_request() {
+    local provider="$1"
+    local request_file="$2"
+    shift 2
+
+    if [ -f "${request_file}" ]; then
+        python run_batch.py --provider "${provider}" --request "${request_file}" "$@"
+    else
+        echo "Request file ${request_file} not found." >&2
+    fi
+}
 
 
 reload() {
@@ -68,12 +100,16 @@ unload() {
     unset -f check_optimization
     unset -f commands
     unset -f functions
+    unset -f resolve_provider
+    unset -f request_file_for
+    unset -f submit_batch_request
 
     deactivate 2>/dev/null || true
 
     unset GPT_QUERYING_DIR
     unset NOARR_STRUCTURES_DIR
     unset EXO_DIR
+    unset GPT_QUERYING_PROVIDER
 }
 
 
@@ -108,20 +144,7 @@ translate() {
             FRAMEWORKS_TO_RUN=() ;;
         esac
 
-        case "${2:-}" in
-          (openai)
-            PROVIDER="openai" ;;
-          (anthropic)
-            PROVIDER="anthropic" ;;
-          (google)
-            PROVIDER="google" ;;
-          ("")
-            PROVIDER="openai" ;;
-
-          (*)
-            echo "Unsupported provider: ${2:-}" >&2
-            return 1 ;;
-        esac
+        PROVIDER="$(resolve_provider "${2:-}")"
 
         case "${3:-}" in
           (full|all|"")
@@ -147,18 +170,9 @@ translate() {
 
         shift 3 || shift 2 || shift 1 || true
 
-        if [ "${PROVIDER}" == "openai" ]; then
-            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
-                if [ -f "../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
-                    python run_batch.py --request  "../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
-                else
-                    echo "Request file ../requests/openai/translation/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
-                fi
-            done
-        else
-            echo "Translation for provider ${PROVIDER} is not implemented yet." >&2
-            return 1
-        fi
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            submit_batch_request "${PROVIDER}" "$(request_file_for "${PROVIDER}" "translation" "${framework}_${ALGORITHM_CATEGORY}")" "$@"
+        done
     )
 }
 
@@ -224,20 +238,7 @@ optimize() {
             VERSIONS_TO_RUN=() ;;
         esac
 
-        case "${3:-}" in
-          (openai)
-            PROVIDER="openai" ;;
-          (anthropic)
-            PROVIDER="anthropic" ;;
-          (google)
-            PROVIDER="google" ;;
-          ("")
-            PROVIDER="openai" ;;
-
-          (*)
-            echo "Unsupported provider: ${3:-}" >&2
-            return 1 ;;
-        esac
+        PROVIDER="$(resolve_provider "${3:-}")"
 
         case "${4:-}" in
           (full|all|"")
@@ -263,20 +264,11 @@ optimize() {
 
         shift 4 || shift 3 || shift 2 || shift 1 || true
 
-        if [ "${PROVIDER}" == "openai" ]; then
-            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
-                for version in "${VERSIONS_TO_RUN[@]}"; do
-                    if [ -f "../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl" ]; then
-                        python run_batch.py --request  "../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl" "$@"
-                    else
-                        echo "Request file ../requests/openai/optimization/${framework}_${version}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
-                    fi
-                done
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            for version in "${VERSIONS_TO_RUN[@]}"; do
+                submit_batch_request "${PROVIDER}" "$(request_file_for "${PROVIDER}" "optimization" "${framework}_${version}_${ALGORITHM_CATEGORY}")" "$@"
             done
-        else
-            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
-            return 1
-        fi
+        done
     )
 }
 
@@ -303,20 +295,7 @@ to_model() {
             FRAMEWORKS_TO_RUN=() ;;
         esac
 
-        case "${2:-}" in
-          (openai)
-            PROVIDER="openai" ;;
-          (anthropic)
-            PROVIDER="anthropic" ;;
-          (google)
-            PROVIDER="google" ;;
-          ("")
-            PROVIDER="openai" ;;
-
-          (*)
-            echo "Unsupported provider: ${2:-}" >&2
-            return 1 ;;
-        esac
+        PROVIDER="$(resolve_provider "${2:-}")"
 
         case "${3:-}" in
           (full|all|"")
@@ -342,18 +321,9 @@ to_model() {
 
         shift 3 || shift 2 || shift 1 || true
 
-        if [ "${PROVIDER}" == "openai" ]; then
-            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
-                if [ -f "../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
-                    python run_batch.py --request  "../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
-                else
-                    echo "Request file ../requests/openai/to_model/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
-                fi
-            done
-        else
-            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
-            return 1
-        fi
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            submit_batch_request "${PROVIDER}" "$(request_file_for "${PROVIDER}" "to_model" "${framework}_${ALGORITHM_CATEGORY}")" "$@"
+        done
     )
 }
 
@@ -380,20 +350,7 @@ from_model() {
             FRAMEWORKS_TO_RUN=() ;;
         esac
 
-        case "${2:-}" in
-          (openai)
-            PROVIDER="openai" ;;
-          (anthropic)
-            PROVIDER="anthropic" ;;
-          (google)
-            PROVIDER="google" ;;
-          ("")
-            PROVIDER="openai" ;;
-
-          (*)
-            echo "Unsupported provider: ${2:-}" >&2
-            return 1 ;;
-        esac
+        PROVIDER="$(resolve_provider "${2:-}")"
 
         case "${3:-}" in
           (full|all|"")
@@ -419,18 +376,9 @@ from_model() {
 
         shift 3 || shift 2 || shift 1 || true
 
-        if [ "${PROVIDER}" == "openai" ]; then
-            for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
-                if [ -f "../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" ]; then
-                    python run_batch.py --request  "../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl" "$@"
-                else
-                    echo "Request file ../requests/openai/from_model/${framework}_${ALGORITHM_CATEGORY}.jsonl not found." >&2
-                fi
-            done
-        else
-            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
-            return 1
-        fi
+        for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
+            submit_batch_request "${PROVIDER}" "$(request_file_for "${PROVIDER}" "from_model" "${framework}_${ALGORITHM_CATEGORY}")" "$@"
+        done
     )
 }
 
@@ -438,29 +386,11 @@ receive() {
     (
         cd "${GPT_QUERYING_DIR}" || exit 1
 
-        case "${1:-}" in
-          (openai)
-            PROVIDER="openai" ;;
-          (anthropic)
-            PROVIDER="anthropic" ;;
-          (google)
-            PROVIDER="google" ;;
-          ("")
-            PROVIDER="openai" ;;
-
-          (*)
-            echo "Unsupported provider: ${1:-}" >&2
-            return 1 ;;
-        esac
+        PROVIDER="$(resolve_provider "${1:-}")"
 
         shift 1
 
-        if [ "${PROVIDER}" == "openai" ]; then
-            python run_batch.py --receive "$@"
-        else
-            echo "Receiving for provider ${PROVIDER} is not implemented yet." >&2
-            return 1
-        fi
+        python run_batch.py --provider "${PROVIDER}" --receive "$@"
     )
 }
 

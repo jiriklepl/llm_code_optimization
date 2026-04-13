@@ -62,6 +62,13 @@ For the initial translation task, run the following set of commands:
 cp gpt-querying/.env.example gpt-querying/.env
 # (get an OpenAI API key and put it in `gpt-querying/.env`)
 
+# Optional: override the default batch generation settings
+export GPT_QUERYING_PROVIDER="openai"
+export GPT_QUERYING_REPETITIONS="5"
+export GPT_QUERYING_MODEL="gpt-5.1-2025-11-13"
+export GPT_QUERYING_REASONING_EFFORT="high"
+export GPT_QUERYING_VERBOSITY="medium"
+
 # Send requests to OpenAI (can cost over $50 and take almost 2 hours)
 ./collect_translations.sh
 

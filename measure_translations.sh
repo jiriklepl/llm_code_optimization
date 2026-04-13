@@ -2,16 +2,17 @@
 
 export DATA_TYPE="${DATA_TYPE:-FLOAT}"
 CACHE=${CACHE:-}
+provider="${GPT_QUERYING_PROVIDER:-openai}"
 
 set -uo pipefail
 
-reps=5
+reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 . functions
 
 
 cleanup "do"
-generate --rep "${reps}" --parse
+generate --rep "${reps}" --parse --provider "${provider}"
 
 algorithms=$(find PolybenchC-4.2.1/datamining PolybenchC-4.2.1/linear-algebra PolybenchC-4.2.1/medley PolybenchC-4.2.1/stencils -type f -name "*.c" | \
 	sed -n 's|.*/\([^/]*\)\.c$|\1|p' | sort -u)

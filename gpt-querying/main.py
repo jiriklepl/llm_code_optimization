@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -18,9 +19,52 @@ logger = getLogger(__name__)
 basicConfig(level=INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 
-DEFAULT_REPETITIONS = 5
+def env_str(*names: str, default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None:
+            value = value.strip()
+            if value:
+                return value
+    return default
+
+
+def env_int(*names: str, default: int, minimum: int = 1) -> int:
+    for name in names:
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            continue
+
+        value = raw_value.strip()
+        if not value:
+            continue
+
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            joined_names = ", ".join(names)
+            raise SystemExit(f"Expected an integer in {joined_names}, got {raw_value!r}.") from exc
+
+        if parsed < minimum:
+            joined_names = ", ".join(names)
+            raise SystemExit(f"Expected {joined_names} to be >= {minimum}, got {parsed}.")
+
+        return parsed
+
+    return default
+
+
+DEFAULT_REPETITIONS = env_int("GPT_QUERYING_REPETITIONS", "GPT_QUERYING_REPS", default=5)
 TEST_BENCHMARKS = ("2mm", "floyd-warshall", "heat-3d", "gemm")
 CATEGORIES = ["linear-algebra", "datamining", "stencil", "medley", "full", "test"]
+DEFAULT_PROVIDER_NAME = env_str("GPT_QUERYING_PROVIDER", default="openai")
+DEFAULT_MODEL = env_str("GPT_QUERYING_MODEL", "GPT_QUERYING_MODEL_SNAPSHOT", default="gpt-5.1-2025-11-13")
+DEFAULT_REASONING_EFFORT = env_str(
+    "GPT_QUERYING_REASONING_EFFORT",
+    "GPT_QUERYING_THINKING_EFFORT",
+    default="high",
+)
+DEFAULT_VERBOSITY = env_str("GPT_QUERYING_VERBOSITY", default="medium")
 
 
 class BatchProvider(ABC):
@@ -57,10 +101,10 @@ class BatchProvider(ABC):
 
 
 @dataclass
-class OpenAIChatBatchProvider(BatchProvider):
+class ChatCompletionsBatchProvider(BatchProvider):
     model: str
-    reasoning_effort: str = "high"
-    verbosity: str = "medium"
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT
+    verbosity: str = DEFAULT_VERBOSITY
     cost_input: float = 0.625 / 1_000_000  # $0.625 per 1M tokens (Batch pricing)
     cost_cached_input: float = 0.0625 / 1_000_000  # $0.0625 per 1M tokens (Batch pricing; 10x cheaper for cached)
     cost_output: float = 5 / 1_000_000  # $5 per 1M tokens (Batch pricing)
@@ -89,7 +133,7 @@ class OpenAIChatBatchProvider(BatchProvider):
             completion = response.usage.completion_tokens
             reasoning = response.usage.completion_tokens_details.reasoning_tokens
         except AttributeError:
-            logger.debug("OpenAI response missing usage details; skipping cost estimation.")
+            logger.debug("Batch response missing usage details; skipping cost estimation.")
             return
 
         prompt_uncached = prompt - prompt_cached
@@ -123,7 +167,31 @@ class OpenAIChatBatchProvider(BatchProvider):
         (output_folder / "costs.json").write_text(costs_log, encoding="utf-8")
 
 
-DEFAULT_PROVIDER = OpenAIChatBatchProvider(model="gpt-5.1-2025-11-13")
+DEFAULT_PROVIDER = ChatCompletionsBatchProvider(
+    model=DEFAULT_MODEL,
+    reasoning_effort=DEFAULT_REASONING_EFFORT,
+    verbosity=DEFAULT_VERBOSITY,
+)
+
+
+def build_batch_provider(
+    model: str = DEFAULT_MODEL,
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+    verbosity: str = DEFAULT_VERBOSITY,
+) -> BatchProvider:
+    return ChatCompletionsBatchProvider(
+        model=model,
+        reasoning_effort=reasoning_effort,
+        verbosity=verbosity,
+    )
+
+
+def default_requests_folder(provider_name: str) -> Path:
+    return Path("../requests") / provider_name
+
+
+def default_responses_folder(provider_name: str) -> Path:
+    return Path("../responses") / provider_name
 
 
 def load_file_with_includes(filepath: Path) -> Generator[str]:
@@ -548,15 +616,34 @@ def process_from_model(responses_folder: Path, output_folder: Path, framework: s
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Tool to prepare and process GPT querying batches.")
     parser.add_argument("--prompts-folder", type=Path, default=Path("../prompts"), help="Path to the prompts folder.")
-    parser.add_argument("--requests-folder", type=Path, default=Path("../requests") / "openai", help="Path to the requests folder.")
-    parser.add_argument("--responses-folder", type=Path, default=Path("../responses") / "openai", help="Path to the responses folder.")
+    parser.add_argument("--provider", default=DEFAULT_PROVIDER_NAME, help="Provider label used for request and response folders. Defaults to GPT_QUERYING_PROVIDER.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model identifier written into generated batch requests. Defaults to GPT_QUERYING_MODEL.")
+    parser.add_argument(
+        "--reasoning-effort",
+        "--thinking-effort",
+        dest="reasoning_effort",
+        default=DEFAULT_REASONING_EFFORT,
+        help="Reasoning effort written into generated batch requests. Defaults to GPT_QUERYING_REASONING_EFFORT or GPT_QUERYING_THINKING_EFFORT.",
+    )
+    parser.add_argument(
+        "--verbosity",
+        default=DEFAULT_VERBOSITY,
+        help="Verbosity written into generated batch requests. Defaults to GPT_QUERYING_VERBOSITY.",
+    )
+    parser.add_argument("--requests-folder", type=Path, help="Path to the requests folder. Defaults to ../requests/<provider>.")
+    parser.add_argument("--responses-folder", type=Path, help="Path to the responses folder. Defaults to ../responses/<provider>.")
 
     parser.add_argument("--generated-folder", type=Path, default=Path("../generated"), help="Path to the generated folder.")
     parser.add_argument("--optimization-folder", type=Path, default=Path("../optimization"), help="Path to the optimization folder.")
     parser.add_argument("--to-model-folder", type=Path, default=Path("../to_model"), help="Path to the to_model folder.")
     parser.add_argument("--from-model-folder", type=Path, default=Path("../from_model"), help="Path to the from_model folder.")
 
-    parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS, help="Number of repetitions per prompt.")
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=DEFAULT_REPETITIONS,
+        help="Number of repetitions per prompt. Defaults to GPT_QUERYING_REPETITIONS or GPT_QUERYING_REPS.",
+    )
 
     parser.add_argument("--parse", action="store_true", default=False, help="Do a parse step (otherwise, do a generate phase)")
 
@@ -569,8 +656,13 @@ def main() -> int:
 
     # Folder configuration
     prompts_folder = args.prompts_folder
-    requests_folder = args.requests_folder
-    responses_folder = args.responses_folder
+    requests_folder = args.requests_folder or default_requests_folder(args.provider)
+    responses_folder = args.responses_folder or default_responses_folder(args.provider)
+    provider = build_batch_provider(
+        args.model,
+        reasoning_effort=args.reasoning_effort,
+        verbosity=args.verbosity,
+    )
 
     c_source_folder = Path("../PolybenchC-4.2.1")
     noarr_source_folder = Path("../PolybenchC-Noarr")
@@ -587,9 +679,9 @@ def main() -> int:
     generated_folder = args.generated_folder
     for framework, _, _ in frameworks:
         if args.parse:
-            process_translation(responses_folder / "translation", generated_folder, framework=framework)
+            process_translation(responses_folder / "translation", generated_folder, framework=framework, provider=provider)
         else:
-            prepare_translation(prompts_folder / "translation", requests_folder / "translation", c_source_folder, extension=".c", framework=framework, repetitions=args.repetitions)
+            prepare_translation(prompts_folder / "translation", requests_folder / "translation", c_source_folder, extension=".c", framework=framework, repetitions=args.repetitions, provider=provider)
 
     optimization_variants = [
         "naive",
@@ -605,23 +697,23 @@ def main() -> int:
     for variant in optimization_variants:
         for framework, source_folder, extension in frameworks:
             if args.parse:
-                process_optimization(responses_folder / "optimization", optimization_folder, framework=f"{framework}_{variant}")
+                process_optimization(responses_folder / "optimization", optimization_folder, framework=f"{framework}_{variant}", provider=provider)
             else:
-                prepare_optimization(prompts_folder / "optimization", requests_folder / "optimization", source_folder, extension=extension, framework=f"{framework}_{variant}", repetitions=args.repetitions)
+                prepare_optimization(prompts_folder / "optimization", requests_folder / "optimization", source_folder, extension=extension, framework=f"{framework}_{variant}", repetitions=args.repetitions, provider=provider)
 
     to_model_folder = args.to_model_folder
     for framework, source_folder, extension in frameworks:
         if args.parse:
-            process_to_model(responses_folder / "to_model", to_model_folder, framework=framework)
+            process_to_model(responses_folder / "to_model", to_model_folder, framework=framework, provider=provider)
         else:
-            prepare_to_model(prompts_folder / "to_model", requests_folder / "to_model", source_folder, extension=extension, framework=framework, repetitions=args.repetitions)
+            prepare_to_model(prompts_folder / "to_model", requests_folder / "to_model", source_folder, extension=extension, framework=framework, repetitions=args.repetitions, provider=provider)
 
     from_model_folder = args.from_model_folder
     for framework, source_folder, extension in frameworks:
         if args.parse:
-            process_from_model(responses_folder / "from_model", from_model_folder, framework=framework)
+            process_from_model(responses_folder / "from_model", from_model_folder, framework=framework, provider=provider)
         else:
-            prepare_from_model(prompts_folder / "from_model", requests_folder / "from_model", source_folder, extension=extension, framework=framework, to_model_root=to_model_folder, repetitions=args.repetitions)
+            prepare_from_model(prompts_folder / "from_model", requests_folder / "from_model", source_folder, extension=extension, framework=framework, to_model_root=to_model_folder, repetitions=args.repetitions, provider=provider)
 
     return 0
 

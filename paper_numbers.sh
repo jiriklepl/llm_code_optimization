@@ -1,14 +1,18 @@
 #!/bin/bash
 
+provider="${GPT_QUERYING_PROVIDER:-openai}"
+
 . functions &> /dev/null
 
 set -euo pipefail
+
+reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 echo "Exo non-valid translations: $(grep  "^exo" <(cat ./results/translation/20251215/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 echo "Noarr non-valid translations: $(grep  "^noarr" <(cat ./results/translation/20251215/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 echo "Halide non-valid translations: $(grep  "^halide" <(cat ./results/translation/20251215/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 
-generate --parse &> /dev/null
+generate --rep "${reps}" --parse --provider "${provider}" &> /dev/null
 
 read tot_tokens num_files < <(find optimization/c_all_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 

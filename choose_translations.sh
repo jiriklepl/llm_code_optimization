@@ -1,8 +1,11 @@
 #!/bin/bash
 
 export DATA_TYPE="${DATA_TYPE:-FLOAT}"
+provider="${GPT_QUERYING_PROVIDER:-openai}"
 
 set -euo pipefail
+
+reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 
@@ -39,7 +42,7 @@ fi
 
 rm -rf generated
 cleanup "$mode" "all" "translation"
-generate --parse
+generate --rep "${reps}" --parse --provider "${provider}"
 
 python3 "$choose_best_script" "$results_folder" | awk -F, '/# Best/{start=1; next} start{ print $1, $2, $3, $4 }' | while read -r framework algorithm repetition validity_score; do
 	if [[ -z "$framework" || -z "$algorithm" || -z "$repetition" || "$framework" == "framework" ]]; then

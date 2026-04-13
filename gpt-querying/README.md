@@ -10,6 +10,14 @@ To use OpenAI (paid API):
 * Create an API key: <https://platform.openai.com/api-keys>
 * Rename `.env.example` to `.env` and save the API key there
 
+Default request-generation settings can also be controlled with environment variables:
+
+* `GPT_QUERYING_PROVIDER` for the provider label used in request and response paths
+* `GPT_QUERYING_REPETITIONS` or `GPT_QUERYING_REPS` for the default repetition count
+* `GPT_QUERYING_MODEL` or `GPT_QUERYING_MODEL_SNAPSHOT` for the default model snapshot
+* `GPT_QUERYING_REASONING_EFFORT` or `GPT_QUERYING_THINKING_EFFORT` for the default reasoning effort
+* `GPT_QUERYING_VERBOSITY` for the default verbosity
+
 ## 📝 Usage
 
 The [./main.py](./main.py) is used for generating the batch request files and parsing the responses.
