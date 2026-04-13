@@ -4,9 +4,13 @@ START_PATTERN="${1:-}"
 
 frameworks=("c" "noarr" "halide" "exo")
 
-provider="${GPT_QUERYING_PROVIDER:-gpt51}"
+provider="${provider:-${GPT_QUERYING_PROVIDER:-gpt51}}"
 
-sleep_interval=$((60 * 2 / 2))
+if [ "$provider" = "gemma" ]; then
+    sleep_interval=0
+else
+    sleep_interval=$((60 * 2 / 2))
+fi
 
 . ./functions
 

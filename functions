@@ -17,7 +17,7 @@ export NOARR_STRUCTURES_DIR
 export EXO_DIR
 
 export PATIENCE
-export GPT_QUERYING_PROVIDER="${GPT_QUERYING_PROVIDER:-gpt51}"
+export GPT_QUERYING_PROVIDER="${GPT_QUERYING_PROVIDER:-${provider:-gpt51}}"
 
 (
     cd "${GPT_QUERYING_DIR}" || exit 1
