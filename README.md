@@ -23,7 +23,7 @@ cd replication-package
 - CMake 4.12 or higher.
 - Python 3.13 or higher.
 - Docker or Charliecloud installed on your system.
-- An OpenAI API key for accessing the GPT models, if you plan to run the code generation tasks.
+- Access to either the default `gpt51` provider or the optional `gemma` provider, if you plan to run the code generation tasks.
 
 The experiments were performed on a dual-socket system equipped with Intel Xeon Gold 6130 processors, each comprising 16 cores with 2-way hyper-threading (64 threads in total). All benchmarks were compiled with GCC 15.2 and CMake 4.12.
 
@@ -41,7 +41,7 @@ The project is organized as follows:
 - [submodules](./submodules): Contains the git submodules used in the project: Exo, Halide, Noarr.
 - [patches](./patches): Contains patches applied to the submodules.
 - [prompts](./prompts): Contains the prompt templates used for querying the LLMs.
-- [gpt-querying](./gpt-querying): Contains the code and scripts for querying the LLMs. The OpenAI API should be stored at [gpt-querying/.env](./gpt-querying/.env).
+- [gpt-querying](./gpt-querying): Contains the code and scripts for querying the LLMs. Provider configuration is stored at [gpt-querying/.env](./gpt-querying/.env).
 - [requests](./requests): Contains the batch request files sent to the LLMs.
 - [responses](./responses): Contains the responses received from the LLMs.
 - [results](./results): Contains the measurement results and visualizations (note that only `results/*/20260408` contain detailed validity results in the included csv files).
@@ -58,11 +58,13 @@ For the initial translation task, run the following set of commands:
 # Prepare the batch request files
 . functions && generate
 
-# Prepare the package for OpenAI requests
+# Prepare the package for LLM requests
 cp gpt-querying/.env.example gpt-querying/.env
-# (get an OpenAI API key and put it in `gpt-querying/.env`)
+# Default: use gpt51 with `GPT51_API_KEY=...`
+# Optional: set `GPT_QUERYING_PROVIDER=gemma` and `GEMMA_API_BASE=http://bw01:8000/v1`
+# Optional gemma tuning: `GEMMA_MODEL=google/gemma-4-31b-it`, `GEMMA_TEMPERATURE=0.7`, `GEMMA_API_KEY=...`
 
-# Send requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send requests using the configured provider (can cost over $50 and take almost 2 hours)
 ./collect_translations.sh
 
 # Measure the translations on the (SMALL, MEDIUM, LARGE) input sizes (can take several hours)
@@ -80,18 +82,18 @@ Then, to run the (straightforward) optimization tasks with various prompting:
 # Regenerate the batch request files (updates the optimization requests)
 . functions && generate
 
-# Send naive requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send naive requests using the configured provider (can cost over $50 and take almost 2 hours)
 ./collect_optimizations.sh naive
-# Send all_hints requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send all_hints requests using the configured provider (can cost over $50 and take almost 2 hours)
 ./collect_optimizations.sh all_hints
-# Send choose_hints requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send choose_hints requests using the configured provider (can cost over $50 and take almost 2 hours)
 ./collect_optimizations.sh choose_hints
 ```
 
 And finally, for the tasks involving the abstract optimization tasks:
 
 ```bash
-# Send to_model requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send to_model requests using the configured provider (can cost over $50 and take almost 2 hours)
 #   (this prepares the abstract optimization plans discussed in the paper)
 ./collect_optimizations.sh to_model
 
@@ -99,7 +101,7 @@ And finally, for the tasks involving the abstract optimization tasks:
 # Regenerate the batch request files (updates the optimization requests)
 . functions && generate
 
-# Send from_model requests to OpenAI (can cost over $50 and take almost 2 hours)
+# Send from_model requests using the configured provider (can cost over $50 and take almost 2 hours)
 #   (this prepares the abstract optimization plans discussed in the paper)
 ./collect_optimizations.sh from_model
 ```
@@ -185,9 +187,9 @@ To regenerate the numbers presented in the paper, run the following command:
 bash paper_numbers.sh | tee paper_numbers.txt
 ```
 
-## 🔄 Regenerating the OpenAI request batch files
+## 🔄 Regenerating provider request files
 
-This should be done whenever the files in the [prompts](./prompts) folder are edited. Also, when the [responses/openai/to_model](./responses/openai/to_model) responses change.
+This should be done whenever the files in the [prompts](./prompts) folder are edited. Also, when the provider-specific `responses/<provider>/to_model` responses change.
 
 ```bash
 . functions
@@ -196,7 +198,7 @@ generate
 
 ## 📥 Extracting the responses from the batch files
 
-To extract the responses from the batch files received from OpenAI, run the following command:
+To extract the responses from the provider outputs, run the following command:
 
 ```bash
 . functions

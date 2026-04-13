@@ -23,7 +23,10 @@ DEFAULT_REPETITIONS = 5
 TEST_BENCHMARKS = ("2mm", "floyd-warshall", "heat-3d", "gemm")
 CATEGORIES = ["linear-algebra", "datamining", "stencil", "medley", "full", "test"]
 DEFAULT_PROVIDER_NAME = os.getenv("GPT_QUERYING_PROVIDER", "gpt51")
-DEFAULT_MODEL = "gpt-5.1-2025-11-13"
+DEFAULT_GPT51_MODEL = "gpt-5.1-2025-11-13"
+DEFAULT_GEMMA_MODEL = "google/gemma-4-31b-it"
+DEFAULT_GEMMA_TEMPERATURE = 0.7
+SUPPORTED_PROVIDERS = ("gpt51", "gemma")
 
 
 class BatchProvider(ABC):
@@ -60,7 +63,7 @@ class BatchProvider(ABC):
 
 
 @dataclass
-class ChatCompletionsBatchProvider(BatchProvider):
+class GPT51ChatCompletionsBatchProvider(BatchProvider):
     model: str
     reasoning_effort: str = "high"
     verbosity: str = "medium"
@@ -126,11 +129,92 @@ class ChatCompletionsBatchProvider(BatchProvider):
         (output_folder / "costs.json").write_text(costs_log, encoding="utf-8")
 
 
-DEFAULT_PROVIDER = ChatCompletionsBatchProvider(model=DEFAULT_MODEL)
+@dataclass
+class GemmaChatCompletionsBatchProvider(BatchProvider):
+    model: str
+    temperature: float = DEFAULT_GEMMA_TEMPERATURE
+    url: str = "/v1/chat/completions"
+    method: str = "POST"
+
+    def build_request(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+
+    def extract_response_body(self, batch_result: dict[str, Any]) -> Any:
+        body = super().extract_response_body(batch_result)
+        return munchify(body)
+
+    def extract_answer(self, response: Any) -> str:
+        return response.choices[0].message.content
 
 
-def build_batch_provider(model: str = DEFAULT_MODEL) -> BatchProvider:
-    return ChatCompletionsBatchProvider(model=model)
+DEFAULT_PROVIDER = GPT51ChatCompletionsBatchProvider(model=DEFAULT_GPT51_MODEL)
+
+
+def provider_env_prefix(provider_name: str) -> str:
+    return provider_name.upper().replace("-", "_")
+
+
+def get_supported_provider(provider_name: str) -> str:
+    normalized = provider_name.strip().lower()
+    if normalized not in SUPPORTED_PROVIDERS:
+        supported = ", ".join(SUPPORTED_PROVIDERS)
+        raise ValueError(f"Unsupported provider '{provider_name}'. Supported providers: {supported}.")
+    return normalized
+
+
+def env_first(*keys: str) -> str | None:
+    for key in keys:
+        value = os.getenv(key)
+        if value:
+            return value
+    return None
+
+
+def resolve_model(provider_name: str, cli_model: str | None) -> str:
+    provider_name = get_supported_provider(provider_name)
+    if provider_name == "gpt51":
+        return cli_model or env_first("GPT51_MODEL", "LLM_MODEL", "OPENAI_MODEL") or DEFAULT_GPT51_MODEL
+    if provider_name == "gemma":
+        return cli_model or env_first("GEMMA_MODEL", "LLM_MODEL") or DEFAULT_GEMMA_MODEL
+    raise AssertionError(f"Unhandled provider {provider_name!r}")
+
+
+def resolve_temperature(provider_name: str, cli_temperature: float | None) -> float | None:
+    provider_name = get_supported_provider(provider_name)
+    if provider_name != "gemma":
+        return None
+    if cli_temperature is not None:
+        return cli_temperature
+
+    raw_temperature = env_first("GEMMA_TEMPERATURE", "LLM_TEMPERATURE")
+    if raw_temperature is None:
+        return DEFAULT_GEMMA_TEMPERATURE
+
+    try:
+        return float(raw_temperature)
+    except ValueError as exc:
+        raise ValueError(f"Invalid GEMMA_TEMPERATURE value: {raw_temperature!r}") from exc
+
+
+def build_request_provider(
+    provider_name: str = DEFAULT_PROVIDER_NAME,
+    model: str | None = None,
+    temperature: float | None = None,
+) -> BatchProvider:
+    provider_name = get_supported_provider(provider_name)
+    resolved_model = resolve_model(provider_name, model)
+
+    if provider_name == "gpt51":
+        return GPT51ChatCompletionsBatchProvider(model=resolved_model)
+    if provider_name == "gemma":
+        resolved_temperature = resolve_temperature(provider_name, temperature)
+        assert resolved_temperature is not None
+        return GemmaChatCompletionsBatchProvider(model=resolved_model, temperature=resolved_temperature)
+    raise AssertionError(f"Unhandled provider {provider_name!r}")
 
 
 def default_requests_folder(provider_name: str) -> Path:
@@ -564,7 +648,8 @@ def build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Tool to prepare and process GPT querying batches.")
     parser.add_argument("--prompts-folder", type=Path, default=Path("../prompts"), help="Path to the prompts folder.")
     parser.add_argument("--provider", default=DEFAULT_PROVIDER_NAME, help="Provider label used for request and response folders.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model identifier written into generated batch requests.")
+    parser.add_argument("--model", help="Model identifier written into generated requests. Defaults depend on the provider.")
+    parser.add_argument("--temperature", type=float, help="Sampling temperature for providers that support it (used by gemma).")
     parser.add_argument("--requests-folder", type=Path, help="Path to the requests folder. Defaults to ../requests/<provider>.")
     parser.add_argument("--responses-folder", type=Path, help="Path to the responses folder. Defaults to ../responses/<provider>.")
 
@@ -585,10 +670,15 @@ def main() -> int:
     args = parser.parse_args()
 
     # Folder configuration
+    try:
+        provider_name = get_supported_provider(args.provider)
+        provider = build_request_provider(provider_name, model=args.model, temperature=args.temperature)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     prompts_folder = args.prompts_folder
-    requests_folder = args.requests_folder or default_requests_folder(args.provider)
-    responses_folder = args.responses_folder or default_responses_folder(args.provider)
-    provider = build_batch_provider(args.model)
+    requests_folder = args.requests_folder or default_requests_folder(provider_name)
+    responses_folder = args.responses_folder or default_responses_folder(provider_name)
 
     c_source_folder = Path("../PolybenchC-4.2.1")
     noarr_source_folder = Path("../PolybenchC-Noarr")
