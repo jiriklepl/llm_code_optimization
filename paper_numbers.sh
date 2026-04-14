@@ -3,6 +3,7 @@
 provider="${GPT_QUERYING_PROVIDER:-openai}"
 
 . functions &> /dev/null
+provider="$(resolve_provider "${provider}")"
 
 set -euo pipefail
 

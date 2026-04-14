@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 from argparse import ArgumentParser
 import json
-import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -15,56 +15,54 @@ from typing import Any, Generator, List
 from colorama import Fore, Style
 from munch import munchify
 
+from providers import (
+    DEFAULT_PROVIDER_MODELS,
+    DEFAULT_PROVIDER_NAME,
+    DEFAULT_REASONING_EFFORT,
+    DEFAULT_VERBOSITY,
+    anthropic_prefers_adaptive_thinking,
+    env_int,
+    normalize_provider_name,
+    resolve_anthropic_effort,
+    resolve_anthropic_max_tokens,
+    resolve_anthropic_thinking_budget,
+    resolve_gemini_reasoning_effort,
+    resolve_gemini_include_thoughts,
+    resolve_gemini_thinking_budget,
+    resolve_provider_model,
+    resolve_reasoning_effort,
+    resolve_verbosity,
+)
+
 logger = getLogger(__name__)
 basicConfig(level=INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-
-def env_str(*names: str, default: str) -> str:
-    for name in names:
-        value = os.getenv(name)
-        if value is not None:
-            value = value.strip()
-            if value:
-                return value
-    return default
-
-
-def env_int(*names: str, default: int, minimum: int = 1) -> int:
-    for name in names:
-        raw_value = os.getenv(name)
-        if raw_value is None:
-            continue
-
-        value = raw_value.strip()
-        if not value:
-            continue
-
-        try:
-            parsed = int(value)
-        except ValueError as exc:
-            joined_names = ", ".join(names)
-            raise SystemExit(f"Expected an integer in {joined_names}, got {raw_value!r}.") from exc
-
-        if parsed < minimum:
-            joined_names = ", ".join(names)
-            raise SystemExit(f"Expected {joined_names} to be >= {minimum}, got {parsed}.")
-
-        return parsed
-
-    return default
 
 
 DEFAULT_REPETITIONS = env_int("GPT_QUERYING_REPETITIONS", "GPT_QUERYING_REPS", default=5)
 TEST_BENCHMARKS = ("2mm", "floyd-warshall", "heat-3d", "gemm")
 CATEGORIES = ["linear-algebra", "datamining", "stencil", "medley", "full", "test"]
-DEFAULT_PROVIDER_NAME = env_str("GPT_QUERYING_PROVIDER", default="openai")
-DEFAULT_MODEL = env_str("GPT_QUERYING_MODEL", "GPT_QUERYING_MODEL_SNAPSHOT", default="gpt-5.1-2025-11-13")
-DEFAULT_REASONING_EFFORT = env_str(
-    "GPT_QUERYING_REASONING_EFFORT",
-    "GPT_QUERYING_THINKING_EFFORT",
-    default="high",
-)
-DEFAULT_VERBOSITY = env_str("GPT_QUERYING_VERBOSITY", default="medium")
+
+
+def object_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def first_present(*values: Any) -> Any | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+@dataclass
+class ParsedBatchResult:
+    custom_id: str
+    response_body: Any | None = None
+    error_payload: dict[str, Any] | None = None
 
 
 class BatchProvider(ABC):
@@ -82,14 +80,12 @@ class BatchProvider(ABC):
             "body": body,
         }
 
-    def get_custom_id(self, batch_result: dict[str, Any]) -> str:
-        return batch_result["custom_id"]
-
-    def extract_response_body(self, batch_result: dict[str, Any]) -> Any:
-        return batch_result["response"]["body"]
-
     def estimate_cost(self, response: Any, output_folder: Path, time_taken: float | None = None) -> None:
         return None
+
+    @abstractmethod
+    def parse_batch_result(self, batch_result: dict[str, Any]) -> ParsedBatchResult:
+        ...
 
     @abstractmethod
     def build_request(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
@@ -101,15 +97,59 @@ class BatchProvider(ABC):
 
 
 @dataclass
-class ChatCompletionsBatchProvider(BatchProvider):
+class OpenAICompatibleBatchProvider(BatchProvider):
+    name: str
     model: str
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
-    verbosity: str = DEFAULT_VERBOSITY
-    cost_input: float = 0.625 / 1_000_000  # $0.625 per 1M tokens (Batch pricing)
-    cost_cached_input: float = 0.0625 / 1_000_000  # $0.0625 per 1M tokens (Batch pricing; 10x cheaper for cached)
-    cost_output: float = 5 / 1_000_000  # $5 per 1M tokens (Batch pricing)
     url: str = "/v1/chat/completions"
     method: str = "POST"
+
+    def parse_batch_result(self, batch_result: dict[str, Any]) -> ParsedBatchResult:
+        custom_id = batch_result["custom_id"]
+        response = batch_result.get("response")
+        if not isinstance(response, dict):
+            return ParsedBatchResult(
+                custom_id=custom_id,
+                error_payload={
+                    "message": "Batch result is missing a response payload.",
+                    "raw": batch_result,
+                },
+            )
+
+        status_code = response.get("status_code")
+        body = response.get("body")
+        if status_code != 200 or body is None:
+            return ParsedBatchResult(
+                custom_id=custom_id,
+                error_payload={
+                    "status_code": status_code,
+                    "body": body,
+                    "error": batch_result.get("error"),
+                },
+            )
+
+        return ParsedBatchResult(custom_id=custom_id, response_body=munchify(body))
+
+    def extract_answer(self, response: Any) -> str:
+        content = response.choices[0].message.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = [
+                object_get(item, "text")
+                for item in content
+                if object_get(item, "text")
+            ]
+            return "\n".join(text_parts)
+        return str(content)
+
+
+@dataclass
+class OpenAIBatchProvider(OpenAICompatibleBatchProvider):
+    verbosity: str = DEFAULT_VERBOSITY
+    cost_input: float = 0.625 / 1_000_000
+    cost_cached_input: float = 0.0625 / 1_000_000
+    cost_output: float = 5 / 1_000_000
 
     def build_request(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -118,13 +158,6 @@ class ChatCompletionsBatchProvider(BatchProvider):
             "verbosity": self.verbosity,
             "messages": messages,
         }
-
-    def extract_response_body(self, batch_result: dict[str, Any]) -> Any:
-        body = super().extract_response_body(batch_result)
-        return munchify(body)
-
-    def extract_answer(self, response: Any) -> str:
-        return response.choices[0].message.content
 
     def estimate_cost(self, response: Any, output_folder: Path, time_taken: float | None = None) -> None:
         try:
@@ -167,31 +200,300 @@ class ChatCompletionsBatchProvider(BatchProvider):
         (output_folder / "costs.json").write_text(costs_log, encoding="utf-8")
 
 
-DEFAULT_PROVIDER = ChatCompletionsBatchProvider(
-    model=DEFAULT_MODEL,
-    reasoning_effort=DEFAULT_REASONING_EFFORT,
-    verbosity=DEFAULT_VERBOSITY,
-)
+@dataclass
+class GeminiBatchProvider(OpenAICompatibleBatchProvider):
+    gemini_thinking_budget: int | None = None
+    gemini_include_thoughts: bool = False
+
+    def build_request(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+        }
+
+        thinking_config: dict[str, Any] = {}
+
+        if self.gemini_thinking_budget is not None:
+            thinking_config["thinking_budget"] = self.gemini_thinking_budget
+        if self.gemini_include_thoughts:
+            thinking_config["include_thoughts"] = True
+
+        if not thinking_config:
+            gemini_reasoning_effort = resolve_gemini_reasoning_effort(self.model, self.reasoning_effort)
+            if gemini_reasoning_effort is not None:
+                request["reasoning_effort"] = gemini_reasoning_effort
+
+        if thinking_config:
+            request["extra_body"] = {
+                "google": {
+                    "thinking_config": thinking_config,
+                }
+            }
+
+        return request
+
+    def estimate_cost(self, response: Any, output_folder: Path, time_taken: float | None = None) -> None:
+        usage = first_present(
+            object_get(response, "usageMetadata"),
+            object_get(response, "usage_metadata"),
+            object_get(response, "usage"),
+        )
+        if usage is None:
+            logger.debug("Gemini batch response missing usage details; skipping cost estimation.")
+            return
+
+        prompt = first_present(
+            object_get(usage, "promptTokenCount"),
+            object_get(usage, "prompt_token_count"),
+            object_get(usage, "prompt_tokens"),
+        )
+        prompt_cached = first_present(
+            object_get(usage, "cachedContentTokenCount"),
+            object_get(usage, "cached_content_token_count"),
+            object_get(object_get(usage, "prompt_tokens_details"), "cached_tokens"),
+            0,
+        )
+        reasoning = first_present(
+            object_get(usage, "thoughtsTokenCount"),
+            object_get(usage, "thoughts_token_count"),
+            object_get(object_get(usage, "completion_tokens_details"), "reasoning_tokens"),
+            0,
+        )
+        completion = first_present(
+            object_get(usage, "completion_tokens"),
+            object_get(usage, "totalTokenCount"),
+            object_get(usage, "total_token_count"),
+        )
+        output = first_present(
+            object_get(usage, "candidatesTokenCount"),
+            object_get(usage, "candidates_token_count"),
+        )
+
+        if output is None and completion is not None:
+            output = max(int(completion) - int(reasoning), 0)
+        if prompt is None or output is None:
+            logger.debug("Gemini batch response did not expose token counts in a supported shape.")
+            return
+
+        prompt = int(prompt)
+        prompt_cached = int(prompt_cached or 0)
+        reasoning = int(reasoning or 0)
+        output = int(output)
+
+        prompt_uncached = max(prompt - prompt_cached, 0)
+        low_tier = prompt <= 200_000
+        cost_input = (0.625 if low_tier else 1.25) / 1_000_000
+        cost_output = (5 if low_tier else 7.5) / 1_000_000
+
+        prompt_uncached_cost = prompt_uncached * cost_input
+        prompt_cached_cost = 0.0
+        output_cost = output * cost_output
+        reasoning_cost = reasoning * cost_output
+
+        costs = {
+            "prompt_uncached_tokens": prompt_uncached,
+            "prompt_uncached_cost": prompt_uncached_cost,
+            "prompt_cached_tokens": prompt_cached,
+            "prompt_cached_cost": prompt_cached_cost,
+            "cached_cost_estimate_unavailable": prompt_cached > 0,
+            "output_tokens": output,
+            "cost_output": output_cost,
+            "reasoning_tokens": reasoning,
+            "cost_reasoning": reasoning_cost,
+            "total_cost": prompt_uncached_cost + prompt_cached_cost + output_cost + reasoning_cost,
+        }
+        if time_taken:
+            costs["time_taken_in_seconds"] = time_taken
+
+        costs_log = json.dumps(costs, indent=2)
+        logger.info(f"Estimated cost (USD):\n{Fore.YELLOW}{costs_log}{Style.RESET_ALL}")
+        (output_folder / "costs.json").write_text(costs_log, encoding="utf-8")
+
+
+@dataclass
+class AnthropicBatchProvider(BatchProvider):
+    model: str
+    max_tokens: int
+    thinking_budget: int | None = None
+    effort: str | None = None
+    adaptive_thinking: bool = False
+    method: str = "POST"
+    url: str = "/v1/messages"
+
+    def create_batch_entry(self, custom_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "custom_id": custom_id,
+            "params": body,
+        }
+
+    def parse_batch_result(self, batch_result: dict[str, Any]) -> ParsedBatchResult:
+        custom_id = batch_result.get("custom_id") or batch_result.get("id")
+        if not custom_id:
+            raise KeyError("Anthropic batch result is missing custom_id/id.")
+
+        result = batch_result.get("result")
+        if not isinstance(result, dict):
+            return ParsedBatchResult(
+                custom_id=custom_id,
+                error_payload={
+                    "message": "Anthropic batch result is missing a result payload.",
+                    "raw": batch_result,
+                },
+            )
+
+        result_type = result.get("type")
+        if result_type == "succeeded":
+            return ParsedBatchResult(
+                custom_id=custom_id,
+                response_body=munchify(result.get("message", {})),
+            )
+
+        return ParsedBatchResult(custom_id=custom_id, error_payload=result)
+
+    def build_request(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
+        system_parts: list[str] = []
+        anthropic_messages: list[dict[str, Any]] = []
+
+        for message in messages:
+            role = message["role"]
+            content = message["content"]
+            if role == "system":
+                system_parts.append(content)
+            else:
+                anthropic_messages.append({"role": role, "content": content})
+
+        request: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": anthropic_messages,
+        }
+        if system_parts:
+            request["system"] = "\n\n".join(system_parts)
+        if self.effort is not None:
+            request["output_config"] = {"effort": self.effort}
+        if self.thinking_budget is not None:
+            request["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self.thinking_budget,
+            }
+        elif self.adaptive_thinking:
+            request["thinking"] = {"type": "adaptive"}
+
+        return request
+
+    def extract_answer(self, response: Any) -> str:
+        content = object_get(response, "content")
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return ""
+
+        text_parts = [
+            object_get(block, "text")
+            for block in content
+            if object_get(block, "type") == "text" and object_get(block, "text")
+        ]
+        return "\n".join(text_parts).strip()
+
+    def estimate_cost(self, response: Any, output_folder: Path, time_taken: float | None = None) -> None:
+        usage = object_get(response, "usage")
+        if usage is None:
+            logger.debug("Anthropic batch response missing usage details; skipping cost estimation.")
+            return
+
+        prompt_uncached = int(object_get(usage, "input_tokens", 0) or 0)
+        output = int(object_get(usage, "output_tokens", 0) or 0)
+        prompt_uncached_cost = prompt_uncached * (7.5 / 1_000_000)
+        output_cost = output * (37.5 / 1_000_000)
+
+        costs = {
+            "prompt_uncached_tokens": prompt_uncached,
+            "prompt_uncached_cost": prompt_uncached_cost,
+            "prompt_cached_tokens": 0,
+            "prompt_cached_cost": 0.0,
+            "output_tokens": output,
+            "cost_output": output_cost,
+            "reasoning_tokens": 0,
+            "cost_reasoning": 0.0,
+            "thinking_token_split_unavailable": True,
+            "total_cost": prompt_uncached_cost + output_cost,
+        }
+        if time_taken:
+            costs["time_taken_in_seconds"] = time_taken
+
+        costs_log = json.dumps(costs, indent=2)
+        logger.info(f"Estimated cost (USD):\n{Fore.YELLOW}{costs_log}{Style.RESET_ALL}")
+        (output_folder / "costs.json").write_text(costs_log, encoding="utf-8")
 
 
 def build_batch_provider(
-    model: str = DEFAULT_MODEL,
+    provider_name: str = DEFAULT_PROVIDER_NAME,
+    model: str | None = None,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     verbosity: str = DEFAULT_VERBOSITY,
+    gemini_thinking_budget: int | None = None,
+    gemini_include_thoughts: bool = False,
+    anthropic_thinking_budget: int | None = None,
+    anthropic_max_tokens: int | None = None,
 ) -> BatchProvider:
-    return ChatCompletionsBatchProvider(
-        model=model,
-        reasoning_effort=reasoning_effort,
-        verbosity=verbosity,
-    )
+    canonical_provider = normalize_provider_name(provider_name)
+    resolved_model = model or DEFAULT_PROVIDER_MODELS[canonical_provider]
+
+    if canonical_provider == "openai":
+        return OpenAIBatchProvider(
+            name=canonical_provider,
+            model=resolved_model,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
+        )
+    if canonical_provider == "gemini":
+        return GeminiBatchProvider(
+            name=canonical_provider,
+            model=resolved_model,
+            reasoning_effort=reasoning_effort,
+            gemini_thinking_budget=gemini_thinking_budget,
+            gemini_include_thoughts=gemini_include_thoughts,
+        )
+    if canonical_provider == "anthropic":
+        anthropic_effort = resolve_anthropic_effort(resolved_model, reasoning_effort)
+        return AnthropicBatchProvider(
+            model=resolved_model,
+            max_tokens=anthropic_max_tokens if anthropic_max_tokens is not None else resolve_anthropic_max_tokens(
+                thinking_budget=anthropic_thinking_budget,
+            ),
+            thinking_budget=anthropic_thinking_budget,
+            effort=anthropic_effort,
+            adaptive_thinking=anthropic_effort is not None and anthropic_thinking_budget is None and anthropic_prefers_adaptive_thinking(resolved_model),
+        )
+
+    raise SystemExit(f"Unsupported provider: {provider_name}")
+
+
+DEFAULT_PROVIDER_MODEL = resolve_provider_model(DEFAULT_PROVIDER_NAME)
+DEFAULT_ANTHROPIC_THINKING_BUDGET = resolve_anthropic_thinking_budget(
+    reasoning_effort=DEFAULT_REASONING_EFFORT,
+    model=DEFAULT_PROVIDER_MODEL if DEFAULT_PROVIDER_NAME == "anthropic" else None,
+)
+DEFAULT_PROVIDER = build_batch_provider(
+    DEFAULT_PROVIDER_NAME,
+    model=DEFAULT_PROVIDER_MODEL,
+    reasoning_effort=DEFAULT_REASONING_EFFORT,
+    verbosity=DEFAULT_VERBOSITY,
+    gemini_thinking_budget=resolve_gemini_thinking_budget(),
+    gemini_include_thoughts=resolve_gemini_include_thoughts(),
+    anthropic_thinking_budget=DEFAULT_ANTHROPIC_THINKING_BUDGET,
+    anthropic_max_tokens=resolve_anthropic_max_tokens(
+        thinking_budget=DEFAULT_ANTHROPIC_THINKING_BUDGET,
+    ),
+)
 
 
 def default_requests_folder(provider_name: str) -> Path:
-    return Path("../requests") / provider_name
+    return Path("../requests") / normalize_provider_name(provider_name)
 
 
 def default_responses_folder(provider_name: str) -> Path:
-    return Path("../responses") / provider_name
+    return Path("../responses") / normalize_provider_name(provider_name)
 
 
 def load_file_with_includes(filepath: Path) -> Generator[str]:
@@ -272,6 +574,11 @@ def save_code_block(response_text: str, output_folder: Path):
     output_file.write_text(code_block, encoding="utf-8")
 
 
+def save_error_record(error_payload: dict[str, Any], output_folder: Path) -> None:
+    error_file = output_folder / "error.json"
+    error_file.write_text(json.dumps(error_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def prepare_batch_file(
     system_filename: Path,
     user_filenames: List[Path],
@@ -295,17 +602,38 @@ def prepare_batch_file(
 
 def parse_batch_output(output_filename: Path, output_folder: Path, provider: BatchProvider = DEFAULT_PROVIDER):
     with open(output_filename, "r", encoding="utf-8") as f:
-        for line in f:
-            response = json.loads(line)
-            custom_id = provider.get_custom_id(response)
-            response_body = provider.extract_response_body(response)
+        for line_number, line in enumerate(f, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
 
-            current_output_folder = output_folder / custom_id
+            try:
+                response = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                logger.warning("Skipping invalid JSON on line %d in %s: %s", line_number, output_filename, exc)
+                continue
+
+            try:
+                parsed = provider.parse_batch_result(response)
+            except Exception as exc:
+                logger.warning("Failed to parse line %d in %s: %s", line_number, output_filename, exc)
+                continue
+
+            current_output_folder = output_folder / parsed.custom_id
             current_output_folder.mkdir(exist_ok=True, parents=True)
 
-            response_text = provider.extract_answer(response_body)
-            save_code_block(response_text, current_output_folder)
-            provider.estimate_cost(response_body, current_output_folder)
+            if parsed.error_payload is not None:
+                logger.warning("Saving error payload for %s from %s.", parsed.custom_id, output_filename)
+                save_error_record(parsed.error_payload, current_output_folder)
+                continue
+
+            try:
+                response_text = provider.extract_answer(parsed.response_body)
+                save_code_block(response_text, current_output_folder)
+                provider.estimate_cost(parsed.response_body, current_output_folder)
+            except Exception as exc:
+                logger.warning("Failed to extract answer for %s from %s: %s", parsed.custom_id, output_filename, exc)
+                save_error_record({"message": str(exc), "raw": response}, current_output_folder)
 
     logger.info(f"Parsed batch output: {output_filename}")
 
@@ -616,20 +944,29 @@ def process_from_model(responses_folder: Path, output_folder: Path, framework: s
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Tool to prepare and process GPT querying batches.")
     parser.add_argument("--prompts-folder", type=Path, default=Path("../prompts"), help="Path to the prompts folder.")
-    parser.add_argument("--provider", default=DEFAULT_PROVIDER_NAME, help="Provider label used for request and response folders. Defaults to GPT_QUERYING_PROVIDER.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model identifier written into generated batch requests. Defaults to GPT_QUERYING_MODEL.")
+    parser.add_argument("--provider", default=DEFAULT_PROVIDER_NAME, help="Provider label used for request and response folders. Aliases: google->gemini, claude/opus->anthropic.")
+    parser.add_argument("--model", default=None, help="Model identifier written into generated batch requests. Defaults to provider-specific GPT_QUERYING_*_MODEL, then GPT_QUERYING_MODEL.")
     parser.add_argument(
         "--reasoning-effort",
         "--thinking-effort",
         dest="reasoning_effort",
-        default=DEFAULT_REASONING_EFFORT,
-        help="Reasoning effort written into generated batch requests. Defaults to GPT_QUERYING_REASONING_EFFORT or GPT_QUERYING_THINKING_EFFORT.",
+        default=None,
+        help="Generic reasoning effort. Used directly by OpenAI, passed through to Gemini with xhigh downgraded to high, and mapped to Anthropic effort or legacy thinking budgets depending on the selected model.",
     )
     parser.add_argument(
         "--verbosity",
-        default=DEFAULT_VERBOSITY,
-        help="Verbosity written into generated batch requests. Defaults to GPT_QUERYING_VERBOSITY.",
+        default=None,
+        help="Verbosity written into generated batch requests. Currently applies to OpenAI requests only.",
     )
+    parser.add_argument("--gemini-thinking-budget", type=int, default=None, help="Explicit Gemini thinking budget. If set, Gemini requests do not also send generic reasoning controls.")
+    parser.add_argument(
+        "--gemini-include-thoughts",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether Gemini should include thought summaries in the response.",
+    )
+    parser.add_argument("--anthropic-thinking-budget", type=int, default=None, help="Explicit Anthropic extended thinking budget.")
+    parser.add_argument("--anthropic-max-tokens", type=int, default=None, help="Anthropic max_tokens value. Defaults to max(300000, thinking_budget + 4096) with the 300k batch beta enabled.")
     parser.add_argument("--requests-folder", type=Path, help="Path to the requests folder. Defaults to ../requests/<provider>.")
     parser.add_argument("--responses-folder", type=Path, help="Path to the responses folder. Defaults to ../responses/<provider>.")
 
@@ -654,14 +991,35 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    provider_name = normalize_provider_name(args.provider)
+    reasoning_effort = resolve_reasoning_effort(args.reasoning_effort)
+    verbosity = resolve_verbosity(args.verbosity)
+    model = resolve_provider_model(provider_name, args.model)
+    gemini_thinking_budget = resolve_gemini_thinking_budget(args.gemini_thinking_budget)
+    gemini_include_thoughts = resolve_gemini_include_thoughts(args.gemini_include_thoughts)
+    anthropic_thinking_budget = resolve_anthropic_thinking_budget(
+        args.anthropic_thinking_budget,
+        reasoning_effort=reasoning_effort,
+        model=model if provider_name == "anthropic" else None,
+    )
+    anthropic_max_tokens = resolve_anthropic_max_tokens(
+        args.anthropic_max_tokens,
+        thinking_budget=anthropic_thinking_budget,
+    )
+
     # Folder configuration
     prompts_folder = args.prompts_folder
-    requests_folder = args.requests_folder or default_requests_folder(args.provider)
-    responses_folder = args.responses_folder or default_responses_folder(args.provider)
+    requests_folder = args.requests_folder or default_requests_folder(provider_name)
+    responses_folder = args.responses_folder or default_responses_folder(provider_name)
     provider = build_batch_provider(
-        args.model,
-        reasoning_effort=args.reasoning_effort,
-        verbosity=args.verbosity,
+        provider_name,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        verbosity=verbosity,
+        gemini_thinking_budget=gemini_thinking_budget,
+        gemini_include_thoughts=gemini_include_thoughts,
+        anthropic_thinking_budget=anthropic_thinking_budget,
+        anthropic_max_tokens=anthropic_max_tokens,
     )
 
     c_source_folder = Path("../PolybenchC-4.2.1")

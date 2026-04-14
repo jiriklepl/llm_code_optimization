@@ -9,6 +9,7 @@ provider="${GPT_QUERYING_PROVIDER:-openai}"
 sleep_interval=$((60 * 2 / 2))
 
 . ./functions
+provider="$(resolve_provider "${provider}")"
 
 paths=()
 for framework in "${frameworks[@]}"; do

@@ -39,6 +39,7 @@ if [[ ! -d "$results_folder" ]]; then
 fi
 
 . functions >&2
+provider="$(resolve_provider "${provider}")"
 
 rm -rf generated
 cleanup "$mode" "all" "translation"

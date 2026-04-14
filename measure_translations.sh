@@ -9,6 +9,7 @@ set -uo pipefail
 reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 . functions
+provider="$(resolve_provider "${provider}")"
 
 
 cleanup "do"

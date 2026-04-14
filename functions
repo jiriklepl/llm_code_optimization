@@ -12,12 +12,26 @@ EXO_DIR="$(realpath "${GPT_QUERYING_DIR}/../submodules/exo")"
 
 PATIENCE=8m
 
+normalize_provider() {
+    case "${1:-openai}" in
+      (openai)
+        printf 'openai\n' ;;
+      (gemini|google)
+        printf 'gemini\n' ;;
+      (anthropic|claude|opus)
+        printf 'anthropic\n' ;;
+      (*)
+        printf '%s\n' "$1" ;;
+    esac
+}
+
 export GPT_QUERYING_DIR
 export NOARR_STRUCTURES_DIR
 export EXO_DIR
 
 export PATIENCE
-export GPT_QUERYING_PROVIDER="${GPT_QUERYING_PROVIDER:-openai}"
+GPT_QUERYING_PROVIDER="$(normalize_provider "${GPT_QUERYING_PROVIDER:-openai}")"
+export GPT_QUERYING_PROVIDER
 
 (
     cd "${GPT_QUERYING_DIR}" || exit 1
@@ -44,9 +58,9 @@ source "${GPT_QUERYING_DIR}/.venv/bin/activate"
 
 resolve_provider() {
     if [ -n "${1:-}" ]; then
-        printf '%s\n' "$1"
+        normalize_provider "$1"
     else
-        printf '%s\n' "${GPT_QUERYING_PROVIDER}"
+        normalize_provider "${GPT_QUERYING_PROVIDER}"
     fi
 }
 
@@ -100,6 +114,7 @@ unload() {
     unset -f check_optimization
     unset -f commands
     unset -f functions
+    unset -f normalize_provider
     unset -f resolve_provider
     unset -f request_file_for
     unset -f submit_batch_request
