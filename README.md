@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19635706.svg)](https://doi.org/10.5281/zenodo.19635706)
+
 # Artifact: Effect of Abstractions and Prompting Strategies on LLM-Guided High-Performance Optimizations
 
 This repository contains the replication package for the paper "Effect of Abstractions and Prompting Strategies on LLM-Guided High-Performance Optimizations" submitted to HLPP 2026. The package includes all necessary code, scripts, and instructions to reproduce the results presented in the paper.
