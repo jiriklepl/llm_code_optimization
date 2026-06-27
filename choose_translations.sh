@@ -21,7 +21,8 @@ results_dir="$script_dir/results/translation"
 # Find the newest results folder (each named by timestamp)
 # newest_results=$(find "$results_dir" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
 
-# use the results used during the experiments
+# This special preselection run was used to choose the translated baselines.
+# Do not replace it with newer measurement-result directories.
 newest_results="$results_dir/20251118_155818"
 
 mode="${1:-dry}"

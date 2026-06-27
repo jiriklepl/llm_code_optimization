@@ -48,6 +48,7 @@ The project is organized as follows:
 - [responses](./responses): Contains the responses received from the LLMs.
 - [results](./results): Contains the measurement results and visualizations (note that only `results/*/20260408` contain detailed validity results in the included csv files).
   - [results/translation](./results/translation): Contains the results of the code translation tasks.
+    - [results/translation/20251118_155818](./results/translation/20251118_155818) is the special preselection run used to choose the translated baselines. It is intentionally retained and is not superseded by the newer measurement results.
   - [results/optimization](./results/optimization): Contains the results of the optimization tasks.
   - [results/plots](./results/plots): Contains the plots generated from the results.
 - [scripts](./scripts): Contains utility scripts for analysis and visualization.
@@ -132,7 +133,7 @@ And for the optimizations tasks:
 
 Then collect all folders filled by these scripts into two new folders `TRANSLATION_DIR` and `OPTIMIZATION_DIR` (choose any names)
 
-Our measurement results are in the folders: [results/translation/20251215](./results/translation/20251215) and [results/optimization/20251215](./results/optimization/20251215).
+Our measurement results are in the folders: [results/translation/20260408](./results/translation/20260408) and [results/optimization/20260408](./results/optimization/20260408).
 
 ### Measuring the Tiramisu baseline
 
