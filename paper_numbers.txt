@@ -1,12 +1,12 @@
 Exo non-valid translations: 12
 Noarr non-valid translations: 30
 Halide non-valid translations: 67
-Total output tokens (including reasoning) in C all-hints optimization: 2758961
+Total completion+reasoning tokens in C all-hints optimization: 2758961
 Number of C all-hints optimization requests: 150
-Average output tokens per algorithm: 91965
-Total output tokens (including reasoning) in C choose-hints optimization: 2699056
+Average completion+reasoning tokens per algorithm/request group: 91965
+Total completion+reasoning tokens in C choose-hints optimization: 2699056
 Number of C choose-hints optimization requests: 150
-Average output tokens per algorithm: 89968
+Average completion+reasoning tokens per algorithm/request group: 89968
 Algorithm            Reasoning  Min_Reasoning Max_Reasoning Output     Total     
 trmm                 124116     21129      29935      10630      134746    
 ludcmp               109300     14547      35273      11654      120954    

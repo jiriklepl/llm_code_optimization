@@ -16,15 +16,15 @@ generate --rep "${reps}" --parse --provider "${provider}" &> /dev/null
 
 read tot_tokens num_files < <(find optimization/c_all_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 
-echo "Total output tokens (including reasoning) in C all-hints optimization: $tot_tokens"
+echo "Total completion+reasoning tokens in C all-hints optimization: $tot_tokens"
 echo "Number of C all-hints optimization requests: $((num_files / 2))"
-echo "Average output tokens per algorithm: $((tot_tokens / 30))"
+echo "Average completion+reasoning tokens per algorithm/request group: $((tot_tokens / 30))"
 
 read tot_tokens num_files < <(find optimization/c_choose_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 
-echo "Total output tokens (including reasoning) in C choose-hints optimization: $tot_tokens"
+echo "Total completion+reasoning tokens in C choose-hints optimization: $tot_tokens"
 echo "Number of C choose-hints optimization requests: $((num_files / 2))"
-echo "Average output tokens per algorithm: $((tot_tokens / 30))"
+echo "Average completion+reasoning tokens per algorithm/request group: $((tot_tokens / 30))"
 
 printf "%-20s %-10s %-10s %-10s %-10s %-10s\n" "Algorithm" "Reasoning" "Min_Reasoning" "Max_Reasoning" "Output" "Total"
 find optimization/c_all_hints -name "costs.json" | while read -r file; do
