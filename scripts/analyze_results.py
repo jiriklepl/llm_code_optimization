@@ -2139,6 +2139,8 @@ def normalize_framework_value(framework: object) -> str:
             return "Exo"
         if cleaned == "tiramisu":
             return "Tiramisu"
+        if cleaned == "polly":
+            return "Polly"
         if cleaned == "c":
             return "C"
         if cleaned == "noarr":

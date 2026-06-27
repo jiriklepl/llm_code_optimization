@@ -22,18 +22,20 @@ cd replication-package
 ## 📋 Prerequisites
 
 - GCC 15.2 or higher with OpenMP support.
+- Clang/LLVM 21 with Polly and OpenMP support for the optional Polly baseline.
 - CMake 4.12 or higher.
 - Python 3.13 or higher.
 - Docker or Charliecloud installed on your system.
 - An OpenAI API key for accessing the GPT models, if you plan to run the code generation tasks.
 
-The experiments were performed on a dual-socket system equipped with Intel Xeon Gold 6130 processors, each comprising 16 cores with 2-way hyper-threading (64 threads in total). All benchmarks were compiled with GCC 15.2 and CMake 4.12.
+The experiments were performed on a dual-socket system equipped with Intel Xeon Gold 6130 processors, each comprising 16 cores with 2-way hyper-threading (64 threads in total). The C and LLM-generated benchmarks were compiled with GCC 15.2; the Polly baseline uses Clang/LLVM 21. CMake 4.12 was used for both.
 
 ## 📂 Project Structure
 
 The project is organized as follows:
 
 - [PolybenchC-4.2.1](./PolybenchC-4.2.1): Contains the [Polybench](https://sourceforge.net/projects/polybench/files/) benchmark suite used for evaluation as baseline, and all necessary scripts to build and run them.
+- [PolybenchC-Polly](./PolybenchC-Polly): Builds the same PolyBench C sources with Clang/Polly as a compiler baseline.
 - [PolybenchC-Exo](./PolybenchC-Exo): Contains the translated Polybench benchmark translated to the [Exo](https://github.com/exo-lang/exo) language and all necessary scripts to build and run them.
 - [PolybenchC-Halide](./PolybenchC-Halide): Contains the translated Polybench benchmark translated to the [Halide](https://github.com/halide/Halide) language and all necessary scripts to build and run them.
 - [PolybenchC-Noarr](./PolybenchC-Noarr): Contains the translated Polybench benchmark transcribed using the [Noarr](https://github.com/jiriklepl/noarr-structures) framework and all necessary scripts to build and run them.
@@ -134,6 +136,22 @@ And for the optimizations tasks:
 Then collect all folders filled by these scripts into two new folders `TRANSLATION_DIR` and `OPTIMIZATION_DIR` (choose any names)
 
 Our measurement results are in the folders: [results/translation/20260408](./results/translation/20260408) and [results/optimization/20260408](./results/optimization/20260408).
+
+### Measuring the Polly baseline
+
+Polly is a fixed compiler baseline, not an LLM-generated translation. It is
+therefore built and measured once per dataset size, with repetition `1` and
+version `standard`, and its output is validated against the standard C
+implementation:
+
+```bash
+./measure_translations.sh polly all
+```
+
+The default `./measure_translations.sh all all` command includes Polly as well
+as the LLM-generated Noarr, Halide, and Exo translations. Set
+`POLLY_C_COMPILER` to select another installed Clang executable that provides
+the Polly passes; the default is `clang-21`.
 
 ### Measuring the Tiramisu baseline
 

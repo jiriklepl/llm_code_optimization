@@ -6,19 +6,25 @@ export BUILD_DIR=${BUILD_DIR:-build}
 export DATASET_SIZE=${DATASET_SIZE:-LARGE}
 export DATA_TYPE=${DATA_TYPE:-FLOAT}
 export NPROC=${NPROC:-$(nproc)}
+export POLLY_C_COMPILER=${POLLY_C_COMPILER:-clang-21}
 
-
-if [ ! -d "llvm-project" ]; then
-	git clone --depth 1 https://github.com/llvm/llvm-project.git
+if ! command -v "${POLLY_C_COMPILER}" >/dev/null 2>&1; then
+	echo "Polly compiler '${POLLY_C_COMPILER}' was not found." >&2
+	echo "Install Clang/LLVM 21 with Polly and OpenMP, or set POLLY_C_COMPILER." >&2
+	exit 1
 fi
 
-LLVM_PROJECT_ROOT=$(realpath llvm-project)
+POLLY_C_COMPILER=$(command -v "${POLLY_C_COMPILER}")
+export POLLY_C_COMPILER
 
-(
-	cd "$LLVM_PROJECT_ROOT"
-	cmake -S llvm -B build -DLLVM_ENABLE_PROJECTS="clang;polly;openmp" -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
-	cmake --build build --config Release -j"$NPROC"
-)
+if ! "${POLLY_C_COMPILER}" \
+	-mllvm -polly \
+	-mllvm -polly-vectorizer=stripmine \
+	-mllvm -polly-parallel \
+	-x c -c /dev/null -o /dev/null; then
+	echo "Compiler '${POLLY_C_COMPILER}' does not provide the required Polly passes." >&2
+	exit 1
+fi
 
 # Create the build directory
 cmake -E make_directory "$BUILD_DIR"
@@ -38,13 +44,11 @@ else
 	algorithm="all"
 fi
 
-omp_lib_path="$LLVM_PROJECT_ROOT/build/lib/"
-omp_include_path="$LLVM_PROJECT_ROOT/build/projects/openmp/runtime/src"
-
 # Configure the build
 cmake -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_C_COMPILER="$LLVM_PROJECT_ROOT/build/bin/clang" \
-    -D CMAKE_C_FLAGS="-D POLYBENCH_TIME -D POLYBENCH_DUMP_ARRAYS -D ${DATASET_SIZE}_DATASET -D DATA_TYPE_IS_$DATA_TYPE -D _POSIX_C_SOURCE=200809L -O3 -DNDEBUG -march=native -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-parallel -fopenmp -I $omp_include_path -L $omp_lib_path" \
+    -D CMAKE_C_COMPILER="$POLLY_C_COMPILER" \
+    -D POLYBENCH_DATASET_SIZE="$DATASET_SIZE" \
+    -D POLYBENCH_DATA_TYPE="$DATA_TYPE" \
     -G "Unix Makefiles" \
     ..
 

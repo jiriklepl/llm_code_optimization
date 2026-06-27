@@ -6,12 +6,50 @@ project(PolybenchC VERSION 4.2.1 LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED True)
 
+set(POLYBENCH_DATASET_SIZE "LARGE" CACHE STRING "PolyBench dataset size")
+set_property(
+    CACHE POLYBENCH_DATASET_SIZE
+    PROPERTY STRINGS MINI SMALL MEDIUM LARGE EXTRALARGE
+)
+set(POLYBENCH_DATA_TYPE "FLOAT" CACHE STRING "PolyBench data type")
+set_property(
+    CACHE POLYBENCH_DATA_TYPE
+    PROPERTY STRINGS FLOAT DOUBLE INT
+)
+
+set(POLYBENCH_DATASET_SIZES MINI SMALL MEDIUM LARGE EXTRALARGE)
+if(NOT POLYBENCH_DATASET_SIZE IN_LIST POLYBENCH_DATASET_SIZES)
+    message(FATAL_ERROR "Unsupported PolyBench dataset size: ${POLYBENCH_DATASET_SIZE}")
+endif()
+
+set(POLYBENCH_DATA_TYPES FLOAT DOUBLE INT)
+if(NOT POLYBENCH_DATA_TYPE IN_LIST POLYBENCH_DATA_TYPES)
+    message(FATAL_ERROR "Unsupported PolyBench data type: ${POLYBENCH_DATA_TYPE}")
+endif()
+
 include_directories(utilities)
 
-add_compile_options(-pthread -march=native -mtune=native -Wfatal-errors)
+find_package(OpenMP REQUIRED COMPONENTS C)
+
+add_compile_definitions(
+    POLYBENCH_TIME
+    POLYBENCH_DUMP_ARRAYS
+    ${POLYBENCH_DATASET_SIZE}_DATASET
+    DATA_TYPE_IS_${POLYBENCH_DATA_TYPE}
+    _POSIX_C_SOURCE=200809L
+)
+add_compile_options(
+    -pthread
+    -march=native
+    -mtune=native
+    -Wfatal-errors
+    "SHELL:-mllvm -polly"
+    "SHELL:-mllvm -polly-vectorizer=stripmine"
+    "SHELL:-mllvm -polly-parallel"
+)
 
 link_libraries(m)
-link_libraries(omp)
+link_libraries(OpenMP::OpenMP_C)
 
 add_executable(covariance datamining/covariance/covariance.c utilities/polybench.c)
 add_executable(correlation datamining/correlation/correlation.c utilities/polybench.c)

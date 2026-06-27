@@ -1251,6 +1251,8 @@ postprocess_codes() {
         case "${1:-}" in
           (c)
             FRAMEWORKS_TO_RUN=("c") ;;
+          (polly)
+            FRAMEWORKS_TO_RUN=("polly") ;;
           (noarr)
             FRAMEWORKS_TO_RUN=("noarr") ;;
           (halide)
@@ -1316,6 +1318,7 @@ postprocess_codes() {
 
         declare -A FRAMEWORK_PATHS=(
             [c]="PolybenchC-4.2.1"
+            [polly]="PolybenchC-Polly"
             [noarr]="PolybenchC-Noarr"
             [halide]="PolybenchC-Halide"
             [exo]="PolybenchC-Exo"

@@ -10,25 +10,25 @@ reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 . functions
 
-
-cleanup "do"
-generate --rep "${reps}" --parse --provider "${provider}"
-
 algorithms=$(find PolybenchC-4.2.1/datamining PolybenchC-4.2.1/linear-algebra PolybenchC-4.2.1/medley PolybenchC-4.2.1/stencils -type f -name "*.c" | \
 	sed -n 's|.*/\([^/]*\)\.c$|\1|p' | sort -u)
+
+RUN_POLLY=false
 
 case "${1:-}" in
 (noarr)
 	FRAMEWORKS_TO_RUN=("noarr") ;;
 (polly)
-	FRAMEWORKS_TO_RUN=("polly") ;;
+	FRAMEWORKS_TO_RUN=()
+	RUN_POLLY=true ;;
 (halide)
 	FRAMEWORKS_TO_RUN=("halide") ;;
 (exo)
 	FRAMEWORKS_TO_RUN=("exo") ;;
 
 (all|"")
-	FRAMEWORKS_TO_RUN=("noarr" "polly" "halide" "exo") ;;
+	FRAMEWORKS_TO_RUN=("noarr" "halide" "exo")
+	RUN_POLLY=true ;;
 
 (frameworks)
 	FRAMEWORKS_TO_RUN=("noarr" "halide" "exo") ;;
@@ -38,6 +38,11 @@ case "${1:-}" in
 	FRAMEWORKS_TO_RUN=()
 	exit 1 ;;
 esac
+
+if [[ ${#FRAMEWORKS_TO_RUN[@]} -gt 0 ]]; then
+	cleanup "do"
+	generate --rep "${reps}" --parse --provider "${provider}"
+fi
 
 abs_tolerance="1e-2"
 rel_tolerance="2e-7"
@@ -124,6 +129,31 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 		done 2>> "${error_file}" | tee -a "${output_file}"
 	fi
 
+	if [[ "${RUN_POLLY}" == true ]]; then
+		build "polly" "translation" "clean"
+
+		for algorithm in ${algorithms}; do
+			actual_runs=${runs}
+			if grep -q "^polly,${algorithm},.*,1,${DATASET_SIZE}$" "${validation_file}"; then
+				validation=$(grep "^polly,${algorithm},.*,1,${DATASET_SIZE}$" "${validation_file}")
+				actual_runs=$(( runs - $(grep -c "^polly,standard,${algorithm},.*,1,${DATASET_SIZE}$" "${times_file}") ))
+			else
+				validation=$(check_translation "${algorithm}" "polly" "${abs_tolerance}" "${rel_tolerance}" | awk '{print $0 ",1,'"${DATASET_SIZE}"'"}' | tee -a "${validation_file}")
+				echo "${validation}"
+			fi
+
+			if [[ ${actual_runs} -le 0 ]]; then
+				echo "Skipping Polly baseline ${algorithm} for dataset size ${DATASET_SIZE} (already done)." | tee -a "${output_file}"
+				continue
+			fi
+
+			status_column=$(echo "${validation}" | awk -F, '{print $5}')
+			if [[ ${status_column} == "true" || ${status_column} == "valid" ]]; then
+				run "${algorithm}" "polly" "translation" "${actual_runs}" | awk '{print $0 ",1,'"${DATASET_SIZE}"'"}' | tee -a "${times_file}"
+			fi
+		done 2>> "${error_file}" | tee -a "${output_file}"
+	fi
+
 	for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
 		for rep in $(seq "${reps}"); do
 			invalidate_codes "do" "${framework}" "translation"
@@ -151,10 +181,6 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 					run "${algorithm}" "${framework}" "translation" "${actual_runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"'"}' | tee -a "${times_file}"
 				fi
 			done
-
-			if [ "${framework}" == "c" ] || [ "${framework}" == "polly" ] || [ "${framework}" == "tiramisu" ]; then
-				break
-			fi
 		done 2>> "${error_file}" | tee -a "${output_file}"
 	done
 done
