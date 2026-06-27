@@ -21,10 +21,12 @@ import pandas as pd
 
 from analyze_results import (
     BASELINE_FRAMEWORK,
+    TUNING_BENCHMARKS,
     apply_validation_filter,
     collect_prefixed_files,
     collect_status_tokens,
     compute_speedups,
+    filter_algorithms,
     filter_dataset_sizes,
     filter_frameworks,
     geometric_mean,
@@ -336,6 +338,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="results/plots/attempt_analysis")
     parser.add_argument("--dataset-size", dest="dataset_sizes", action="append")
     parser.add_argument("--no-framework", action="append")
+    parser.add_argument(
+        "--include-tuning-benchmarks",
+        action="store_true",
+        help=(
+            "Include prompt-tuning benchmarks in outputs. By default, 2mm, gemm, "
+            "floyd-warshall, and heat-3d are excluded."
+        ),
+    )
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--format", choices=["png", "pdf"], default="pdf")
     return parser.parse_args()
@@ -369,6 +379,9 @@ def main() -> None:
 
     dataset_filter = normalize_cli_args(args.dataset_sizes)
     excluded_frameworks = normalize_cli_args(args.no_framework)
+    excluded_algorithms = (
+        [] if args.include_tuning_benchmarks else list(TUNING_BENCHMARKS)
+    )
     if dataset_filter:
         translation_times = filter_dataset_sizes(translation_times, dataset_filter)
         optimization_times = filter_dataset_sizes(optimization_times, dataset_filter)
@@ -384,6 +397,15 @@ def main() -> None:
         )
         optimization_validation = filter_frameworks(
             optimization_validation, excluded_frameworks
+        )
+    if excluded_algorithms:
+        translation_times = filter_algorithms(translation_times, excluded_algorithms)
+        optimization_times = filter_algorithms(optimization_times, excluded_algorithms)
+        translation_validation = filter_algorithms(
+            translation_validation, excluded_algorithms
+        )
+        optimization_validation = filter_algorithms(
+            optimization_validation, excluded_algorithms
         )
 
     selected_sizes = sorted(

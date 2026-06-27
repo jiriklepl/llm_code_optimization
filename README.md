@@ -197,6 +197,14 @@ An attempt is a framework/prompt/benchmark/repetition tuple and is validated onl
 
 Across the analysis scripts, ratios from different benchmarks, dataset sizes, prompts, frameworks, or attempts are combined with geometric means. Repeated runtime samples are averaged using arithmetic means. The translation-selection procedure is intentionally exempt from this convention.
 
+The benchmarks `2mm`, `gemm`, `floyd-warshall`, and `heat-3d` were used while
+developing and tuning the prompts. They are therefore excluded by default from
+every visualization and its backing aggregate tables. The same set appears as
+`TEST_BENCHMARKS` in `gpt-querying/main.py` and in the generated
+`requests/openai/{translation,optimization,to_model,from_model}/*_test.jsonl`
+request families. Pass `--include-tuning-benchmarks` directly to an analysis
+script only for diagnostic outputs that intentionally include the tuning set.
+
 ## 🔢 Numbers presented in the paper
 
 To regenerate the numbers presented in the paper, run the following command:

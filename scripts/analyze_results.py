@@ -15,6 +15,7 @@ from matplotlib.patches import Rectangle
 
 
 BASELINE_FRAMEWORK = "c"
+TUNING_BENCHMARKS = ("2mm", "floyd-warshall", "gemm", "heat-3d")
 VALID_STATUS_TRUE = {"valid", "true"}
 VALIDITY_FAILURE_STATUSES = {"invalid", "false", "validity_error"}
 RUNTIME_FAILURE_STATUSES = {"runtime_error", "timeout"}
@@ -136,6 +137,17 @@ def filter_frameworks(
         return df
     disallowed = {str(framework) for framework in disallowed_frameworks}
     return df[~df["framework"].astype(str).isin(disallowed)].copy()
+
+
+def filter_algorithms(
+    df: pd.DataFrame | None, disallowed_algorithms: Sequence[str] | None
+) -> pd.DataFrame | None:
+    """Keep only rows whose algorithm does not match the disallowed list."""
+
+    if df is None or not disallowed_algorithms or "algorithm" not in df.columns:
+        return df
+    disallowed = {str(algorithm) for algorithm in disallowed_algorithms}
+    return df[~df["algorithm"].astype(str).isin(disallowed)].copy()
 
 
 def select_best_standard_baseline(
@@ -2249,6 +2261,14 @@ def main() -> None:
         )
     )
     parser.add_argument(
+        "--include-tuning-benchmarks",
+        action="store_true",
+        help=(
+            "Include prompt-tuning benchmarks in outputs. By default, 2mm, gemm, "
+            "floyd-warshall, and heat-3d are excluded."
+        ),
+    )
+    parser.add_argument(
         "--best",
         choices=["none", "pick", "combine", "smart-combine"],
         default="none",
@@ -2325,6 +2345,7 @@ def main() -> None:
 
     dataset_size_filter = normalize_cli_args(args.dataset_sizes)
     framework_filter = normalize_cli_args(args.no_framework)
+    algorithm_filter = [] if args.include_tuning_benchmarks else list(TUNING_BENCHMARKS)
 
     translation_root = Path(args.translation_path)
     optimization_root = Path(args.optimization_path)
@@ -2367,6 +2388,13 @@ def main() -> None:
         optimization_times = filter_frameworks(optimization_times, framework_filter)
         translation_validation = filter_frameworks(translation_validation, framework_filter)
         optimization_validation = filter_frameworks(optimization_validation, framework_filter)
+
+    if algorithm_filter:
+        print(f"Filtering out prompt-tuning benchmarks: {', '.join(algorithm_filter)}")
+        translation_times = filter_algorithms(translation_times, algorithm_filter)
+        optimization_times = filter_algorithms(optimization_times, algorithm_filter)
+        translation_validation = filter_algorithms(translation_validation, algorithm_filter)
+        optimization_validation = filter_algorithms(optimization_validation, algorithm_filter)
 
     # Keep full copies for classification to ensure validity checks consider all dataset sizes
     translation_times_full = translation_times.copy()
