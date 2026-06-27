@@ -10,7 +10,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
 @dataclass
@@ -22,7 +22,7 @@ class Candidate:
     algorithm: str
     repetition: int
     validity_score: int
-    total_time: float
+    aggregate_time: float
     mean_times: Dict[str, Optional[float]]
 
 
@@ -117,6 +117,15 @@ def format_float(value: Optional[float]) -> str:
         return ""
 
     return f"{value:.6f}"
+
+
+def geometric_mean(values: Iterable[float]) -> float:
+    """Return the geometric mean of positive finite values, or infinity if empty."""
+
+    cleaned = [value for value in values if math.isfinite(value) and value > 0]
+    if not cleaned:
+        return math.inf
+    return math.exp(math.fsum(math.log(value) for value in cleaned) / len(cleaned))
 
 
 def load_time_reports(
@@ -243,11 +252,11 @@ def is_better_candidate(
         return True
 
     if candidate.validity_score == current.validity_score:
-        if candidate.total_time < current.total_time:
+        if candidate.aggregate_time < current.aggregate_time:
             return True
 
         if (
-            candidate.total_time == current.total_time
+            candidate.aggregate_time == current.aggregate_time
             and candidate.repetition < current.repetition
         ):
             return True
@@ -285,10 +294,10 @@ def select_best_candidates(
             for size in tracked_sizes
         }
 
-        total_time = sum(
+        aggregate_time = geometric_mean(
             time
             for time in mean_by_size.values()
-            if time is not None and math.isfinite(time)
+            if time is not None
         )
 
         candidate = Candidate(
@@ -297,7 +306,7 @@ def select_best_candidates(
             algorithm=algorithm,
             repetition=repetition,
             validity_score=validity_score,
-            total_time=total_time,
+            aggregate_time=aggregate_time,
             mean_times=mean_by_size,
         )
 
@@ -348,8 +357,8 @@ def select_total_bests(
     return best
 
 
-def format_total_time(value: float) -> str:
-    """Format total time or return an empty string for non-finite values."""
+def format_aggregate_time(value: float) -> str:
+    """Format aggregate time or return an empty string for non-finite values."""
 
     if not math.isfinite(value):
         return ""
@@ -373,7 +382,7 @@ def emit_best_candidates(
         "algorithm",
         "repetition",
         "validity_score",
-        "total_time",
+        "aggregate_time",
     ] + [f"time_{size}" for size in dataset_sizes]
     print(",".join(header))
 
@@ -381,14 +390,14 @@ def emit_best_candidates(
         candidates.keys(), key=lambda item: (item.algorithm, item.framework)
     ):
         candidate = candidates[key]
-        total_time = format_total_time(candidate.total_time)
+        aggregate_time = format_aggregate_time(candidate.aggregate_time)
         row = [
             candidate.framework,
             candidate.version,
             candidate.algorithm,
             str(candidate.repetition),
             str(candidate.validity_score),
-            total_time,
+            aggregate_time,
         ]
 
         for dataset_size in dataset_sizes:
@@ -413,7 +422,7 @@ def emit_unframeworked_bests(
         "framework",
         "repetition",
         "validity_score",
-        "total_time",
+        "aggregate_time",
     ] + [f"time_{size}" for size in dataset_sizes]
     print(",".join(header))
 
@@ -421,14 +430,14 @@ def emit_unframeworked_bests(
         candidates.keys(), key=lambda item: (item.algorithm, item.version)
     ):
         candidate = candidates[key]
-        total_time = format_total_time(candidate.total_time)
+        aggregate_time = format_aggregate_time(candidate.aggregate_time)
         row = [
             candidate.version,
             candidate.algorithm,
             candidate.framework,
             str(candidate.repetition),
             str(candidate.validity_score),
-            total_time,
+            aggregate_time,
         ]
 
         for dataset_size in dataset_sizes:
@@ -453,20 +462,20 @@ def emit_total_bests(
         "framework",
         "repetition",
         "validity_score",
-        "total_time",
+        "aggregate_time",
     ] + [f"time_{size}" for size in dataset_sizes]
     print(",".join(header))
 
     for key in sorted(candidates.keys(), key=lambda item: item.algorithm):
         candidate = candidates[key]
-        total_time = format_total_time(candidate.total_time)
+        aggregate_time = format_aggregate_time(candidate.aggregate_time)
         row = [
             candidate.algorithm,
             candidate.version,
             candidate.framework,
             str(candidate.repetition),
             str(candidate.validity_score),
-            total_time,
+            aggregate_time,
         ]
 
         for dataset_size in dataset_sizes:

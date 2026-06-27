@@ -397,7 +397,10 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
         combined.groupby(key_cols, as_index=False)
         .agg(
             status=("status", combine_status_values),
-            valid=(get_validation_status_column(combined), "all"),
+            # ``combined`` contains both the normalized status text and the
+            # derived boolean. Aggregating the non-empty status strings with
+            # ``all`` would incorrectly mark every outcome as valid.
+            valid=("valid", "all"),
             has_time_s=("has_time_s", "any"),
         )
     )
@@ -1051,7 +1054,7 @@ def plot_algorithms(
         add_category_boundaries(ax, algorithms, tree_categories)
     ax.set_xticks(range(len(algorithms)))
     ax.set_xticklabels(algorithms, rotation=45, ha="right", fontsize=12)
-    ax.set_ylabel("Geom. mean speedup over baseline", fontsize=14)
+    ax.set_ylabel("Speedup over baseline", fontsize=14)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1208,7 +1211,7 @@ def plot_dataset_size_aggregates(
     ax.axhline(1.0, linestyle="--", color="gray", linewidth=1.0)
     ax.set_xticks(range(len(dataset_sizes)))
     ax.set_xticklabels(dataset_sizes, rotation=45, ha="right", fontsize=12)
-    ax.set_ylabel("Geom. mean speedup over baseline", fontsize=14)
+    ax.set_ylabel("Speedup over baseline", fontsize=14)
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1435,7 +1438,7 @@ def plot_heatmap_table(
     tree_categories: dict[str, str],
     algorithms: Sequence[str],
     row_frameworks: Sequence[str | None],
-    cbar_label: str = "Geom. mean speedup vs translation baseline",
+    cbar_label: str = "Speedup vs translation baseline",
     value_fmt: str = "{:.1f}",
     value_fmt_overrides: dict[str, str] | None = None,
     cmap_name: str = "YlGnBu",
@@ -1480,9 +1483,11 @@ def plot_heatmap_table(
             ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=12)
 
     ax.set_xticks(np.arange(len(col_labels)))
-    ax.set_xticklabels(col_labels, rotation=45, ha="right", fontsize=12)
+    display_col_labels = ["overall" if label == "geom_mean" else label for label in col_labels]
+    display_row_labels = ["overall" if label == "geom_mean" else label for label in row_labels]
+    ax.set_xticklabels(display_col_labels, rotation=45, ha="right", fontsize=12)
     ax.set_yticks(np.arange(len(row_labels)))
-    ax.set_yticklabels(row_labels, fontsize=12)
+    ax.set_yticklabels(display_row_labels, fontsize=12)
 
     if not hide_colorbar:
         cbar = fig.colorbar(im, ax=ax)

@@ -187,6 +187,16 @@ The plots used in the paper are in the folder: [results/plots/](./results/plots/
 bash make_plots.sh
 ```
 
+The same command writes the attempt-level analysis to `results/plots/20260408/` and equivalent single-dataset artifacts to the `results/plots/20260408-{mini,small,medium,large,extralarge}/` directories:
+
+- `framework_prompt_summary.csv` contains validation coverage, median, IQR, and geometric-mean speedup among validated attempts, conditional `speedup_at_5`, and benchmark counts for every framework/prompt pair.
+- `failure_counts.csv` counts attempt-level compile errors, runtime errors, numerical mismatches, and timeouts. A failed attempt can contain more than one failure reason across dataset sizes, so these reason counts may overlap.
+- `best_of_k.csv` exactly enumerates all subsets of the five stored attempts for budgets 1 through 5 and reports validation probability, conditional best speedup, and expected speedup when the C implementation remains available as a fallback. `best_of_k_budget.pdf` visualizes these budget curves.
+
+An attempt is a framework/prompt/benchmark/repetition tuple and is validated only if every selected dataset size validates. Its speedup is the geometric mean across those sizes. All speedups in these four artifacts use the standard C implementation as the baseline; invalid attempts remain in coverage and probability denominators but are excluded from performance aggregates. Conditional best speedup is aggregated over successful benchmark/subset evaluations with a geometric mean; `speedup_at_5` is its value for the full set of five attempts.
+
+Across the analysis scripts, ratios from different benchmarks, dataset sizes, prompts, frameworks, or attempts are combined with geometric means. Repeated runtime samples are averaged using arithmetic means. The translation-selection procedure is intentionally exempt from this convention.
+
 ## 🔢 Numbers presented in the paper
 
 To regenerate the numbers presented in the paper, run the following command:
