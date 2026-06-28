@@ -1,6 +1,50 @@
 Exo non-valid translations: 12
 Noarr non-valid translations: 30
 Halide non-valid translations: 67
+Optimization failure-category summary
+Source: results/plots/20260408/failure_counts.csv
+All frameworks total optimization attempts: 2080
+All frameworks validated attempts: 1258
+All frameworks invalid attempts: 822
+All frameworks compile-error diagnostic count: 454
+All frameworks runtime-error diagnostic count: 276
+All frameworks numerical-mismatch diagnostic count: 92
+All frameworks timeout diagnostic count: 10
+All frameworks unclassified-invalid diagnostic count: 0
+By framework:
+  c total optimization attempts: 520
+  c validated attempts: 460
+  c invalid attempts: 60
+  c compile-error diagnostic count: 33
+  c runtime-error diagnostic count: 1
+  c numerical-mismatch diagnostic count: 24
+  c timeout diagnostic count: 3
+  c unclassified-invalid diagnostic count: 0
+  exo total optimization attempts: 520
+  exo validated attempts: 313
+  exo invalid attempts: 207
+  exo compile-error diagnostic count: 189
+  exo runtime-error diagnostic count: 0
+  exo numerical-mismatch diagnostic count: 18
+  exo timeout diagnostic count: 0
+  exo unclassified-invalid diagnostic count: 0
+  halide total optimization attempts: 520
+  halide validated attempts: 62
+  halide invalid attempts: 458
+  halide compile-error diagnostic count: 167
+  halide runtime-error diagnostic count: 273
+  halide numerical-mismatch diagnostic count: 20
+  halide timeout diagnostic count: 6
+  halide unclassified-invalid diagnostic count: 0
+  noarr total optimization attempts: 520
+  noarr validated attempts: 423
+  noarr invalid attempts: 97
+  noarr compile-error diagnostic count: 65
+  noarr runtime-error diagnostic count: 2
+  noarr numerical-mismatch diagnostic count: 30
+  noarr timeout diagnostic count: 1
+  noarr unclassified-invalid diagnostic count: 0
+Note: diagnostic reason columns are tags, not a disjoint partition; one invalid attempt can contribute to more than one reason count across dataset sizes.
 Total completion+reasoning tokens in C all-hints optimization: 2758961
 Number of C all-hints optimization requests: 150
 Average completion+reasoning tokens per algorithm/request group: 91965

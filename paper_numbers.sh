@@ -1,26 +1,20 @@
 #!/bin/bash
 
-provider="${GPT_QUERYING_PROVIDER:-openai}"
-
-. functions &> /dev/null
-
 set -euo pipefail
-
-reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 echo "Exo non-valid translations: $(grep  "^exo" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 echo "Noarr non-valid translations: $(grep  "^noarr" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 echo "Halide non-valid translations: $(grep  "^halide" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
 
-generate --rep "${reps}" --parse --provider "${provider}" &> /dev/null
+python3 scripts/summarize_failure_counts.py results/plots/20260408/failure_counts.csv
 
-read tot_tokens num_files < <(find optimization/c_all_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
+read -r tot_tokens num_files < <(find optimization/c_all_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 
 echo "Total completion+reasoning tokens in C all-hints optimization: $tot_tokens"
 echo "Number of C all-hints optimization requests: $((num_files / 2))"
 echo "Average completion+reasoning tokens per algorithm/request group: $((tot_tokens / 30))"
 
-read tot_tokens num_files < <(find optimization/c_choose_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
+read -r tot_tokens num_files < <(find optimization/c_choose_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 
 echo "Total completion+reasoning tokens in C choose-hints optimization: $tot_tokens"
 echo "Number of C choose-hints optimization requests: $((num_files / 2))"
