@@ -2,7 +2,7 @@
 
 export BUILD_DIR=${BUILD_DIR:-build}
 export DATASET_SIZE=${DATASET_SIZE:-EXTRALARGE}
-export DATA_TYPE=${DATA_TYPE:-FLOAT}
+export DATA_TYPE=${DATA_TYPE:-DOUBLE}
 export USE_SLURM=${USE_SLURM:-0}
 export DATA_DIR=${DATA_DIR:-data}
 

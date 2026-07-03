@@ -133,6 +133,21 @@ And for the optimizations tasks:
 ./measure_optimizations.sh all from_model all # (can take days)
 ```
 
+The measurement scripts use the `DATA_TYPE` environment variable to select the
+PolyBench datatype. It defaults to `DOUBLE`, matching the Tiramisu baseline
+reported in the reference paper. To run a separate datatype
+configuration, set it explicitly for both translation and optimization
+measurements:
+
+```bash
+DATA_TYPE=FLOAT ./measure_translations.sh frameworks all
+DATA_TYPE=FLOAT ./measure_optimizations.sh all all_hints all
+```
+
+Measurement CSVs include a `data_type` column, and resume/skip checks also use
+that value. This prevents results from different datatype configurations from
+being mixed in the same report directory.
+
 Then collect all folders filled by these scripts into two new folders `TRANSLATION_DIR` and `OPTIMIZATION_DIR` (choose any names)
 
 Our measurement results are in the folders: [results/translation/20260408](./results/translation/20260408) and [results/optimization/20260408](./results/optimization/20260408).
@@ -151,7 +166,8 @@ implementation:
 The default `./measure_translations.sh all all` command includes Polly as well
 as the LLM-generated Noarr, Halide, and Exo translations. Set
 `POLLY_C_COMPILER` to select another installed Clang executable that provides
-the Polly passes; the default is `clang-21`.
+the Polly passes; the default is `clang-21`. Polly measurements use the same
+`DATA_TYPE` setting as the translation measurements.
 
 ### Measuring the Tiramisu baseline
 
@@ -187,6 +203,13 @@ The measurements of the Tiramisu baseline then have to be converted using the fo
 bash translate_compilot.sh
 ```
 
+Converted Tiramisu measurements are marked with `DATA_TYPE`, defaulting to
+`DOUBLE`. For a non-default datatype, run for example:
+
+```bash
+DATA_TYPE=FLOAT bash translate_compilot.sh
+```
+
 And the converted results should be placed in `TRANSLATION_DIR` from the previous section.
 
 ## 📊 Regenerating the results visualizations
@@ -199,6 +222,9 @@ python3 scripts/analyze_results.py TRANSLATION_DIR OPTIMIZATION_DIR \
   --ord=tree  --plot=scatter --format=pdf
 ```
 
+Use `--data-type=DOUBLE` or `--data-type=FLOAT` to restrict analysis to one
+datatype when the input directories contain multiple datatype configurations.
+
 The plots used in the paper are in the folder: [results/plots/](./results/plots/) and can be regenerated with:
 
 ```bash
@@ -208,22 +234,33 @@ bash make_plots.sh
 The same command writes CSV backing tables and plots to `results/plots/20260408/`
 and equivalent single-dataset artifacts to the
 `results/plots/20260408-{mini,small,medium,large,extralarge}/` directories.
+All backing CSVs that contain measured or derived benchmark results report
+`data_type`. Legacy CSVs without this column are interpreted as `DOUBLE` by the
+analysis scripts. Aggregations and best-candidate selection are performed
+within each datatype, not across datatypes.
 
 Attempt-level artifacts:
 
-- `framework_prompt_summary.csv` has one row per framework/prompt pair. `attempt_count` is the number of framework/prompt/benchmark/repetition attempts; `validation_count` and `validation_rate` count attempts that validate on every selected dataset size; `performance_attempt_count` counts validated attempts that also have speedup data; `median_speedup`, `geometric_mean_speedup`, `speedup_q1`, `speedup_q3`, and `speedup_iqr` summarize only performance-eligible attempts; `speedup_at_5` is the conditional best speedup when all five stored attempts are available; `contributing_benchmark_count` counts benchmarks contributing to the speedup aggregate; `benchmark_count` counts covered benchmarks.
-- `failure_counts.csv` has one row per framework/prompt pair. `invalid_attempt_count` is the number of attempts that did not validate. The reason columns (`compile_error_count`, `runtime_error_count`, `numerical_mismatch_count`, `timeout_count`, `unclassified_invalid_count`) are diagnostic tags on invalid attempts, not a partition: one invalid attempt can contribute to more than one reason count across dataset sizes, so these columns need not sum to `invalid_attempt_count`.
-- `best_of_k.csv` has one row per framework/prompt/budget `k`. It exactly enumerates all subsets of the five stored attempts. `subsets_per_benchmark` is `choose(5,k)`, `subset_evaluation_count` is that value times the benchmark count, `successful_subset_count` counts benchmark/subset evaluations containing at least one validated candidate, `probability_validated_candidate` is their fraction, `conditional_best_speedup*` summarizes best speedup only among successful subset evaluations, and `expected_speedup_with_c_fallback` uses 1.0x C performance when no candidate validates or all validated candidates are slower. `best_of_k_budget.pdf` visualizes these budget curves.
+- `framework_prompt_summary.csv` has one row per datatype/framework/prompt tuple. `attempt_count` is the number of framework/prompt/benchmark/repetition attempts; `validation_count` and `validation_rate` count attempts that validate on every selected dataset size; `performance_attempt_count` counts validated attempts that also have speedup data; `median_speedup`, `geometric_mean_speedup`, `speedup_q1`, `speedup_q3`, and `speedup_iqr` summarize only performance-eligible attempts; `speedup_at_5` is the conditional best speedup when all five stored attempts are available; `contributing_benchmark_count` counts benchmarks contributing to the speedup aggregate; `benchmark_count` counts covered benchmarks.
+- `failure_counts.csv` has one row per datatype/framework/prompt tuple. `invalid_attempt_count` is the number of attempts that did not validate. The reason columns (`compile_error_count`, `runtime_error_count`, `numerical_mismatch_count`, `timeout_count`, `unclassified_invalid_count`) are diagnostic tags on invalid attempts, not a partition: one invalid attempt can contribute to more than one reason count across dataset sizes, so these columns need not sum to `invalid_attempt_count`.
+- `best_of_k.csv` has one row per datatype/framework/prompt/budget `k`. It exactly enumerates all subsets of the five stored attempts. `subsets_per_benchmark` is `choose(5,k)`, `subset_evaluation_count` is that value times the benchmark count, `successful_subset_count` counts benchmark/subset evaluations containing at least one validated candidate, `probability_validated_candidate` is their fraction, `conditional_best_speedup*` summarizes best speedup only among successful subset evaluations, and `expected_speedup_with_c_fallback` uses 1.0x C performance when no candidate validates or all validated candidates are slower. `best_of_k_budget.pdf` visualizes these budget curves.
 
 Other CSV backing tables:
 
-- `speedups*.csv` contains per framework/version/benchmark/repetition/dataset-size speedups relative to the selected baseline, plus the optimized and baseline runtimes used for each ratio.
-- `outcomes*.csv` classifies each framework/version/benchmark/repetition outcome into the categories used for correctness and win-rate plots.
-- `shares*.csv` aggregates those outcome categories as percentages across repetitions, grouped by framework, version, or framework/version depending on the filename.
+- `speedups*.csv` contains per datatype/framework/version/benchmark/repetition/dataset-size speedups relative to the selected baseline, plus the optimized and baseline runtimes used for each ratio.
+- `outcomes*.csv` classifies each datatype/framework/version/benchmark/repetition outcome into the categories used for correctness and win-rate plots.
+- `shares*.csv` aggregates those outcome categories as percentages across repetitions, grouped by datatype plus framework, version, or framework/version depending on the filename.
 - `heatmap_speedups*.csv` is the matrix used by the speedup heatmap; benchmark columns contain aggregated speedups, `geom_mean` is the geometric mean across benchmark columns, and `wins` counts benchmark wins under the selected threshold.
 - `heatmap_correctness*.csv` is the matrix used by the correctness heatmap; benchmark columns contain validation shares and `mean_valid` is the arithmetic mean of those shares across benchmark columns.
 
-An attempt is a framework/prompt/benchmark/repetition tuple and is validated only if every selected dataset size validates. Its speedup is the geometric mean across those sizes. All speedups in these four artifacts use the standard C implementation as the baseline; invalid attempts remain in coverage and probability denominators but are excluded from performance aggregates. Conditional best speedup is aggregated over successful benchmark/subset evaluations with a geometric mean; `speedup_at_5` is its value for the full set of five attempts.
+An attempt is a datatype/framework/prompt/benchmark/repetition tuple and is
+validated only if every selected dataset size validates. Its speedup is the
+geometric mean across those sizes. All speedups in these artifacts use the
+standard C implementation with the matching datatype as the baseline; invalid
+attempts remain in coverage and probability denominators but are excluded from
+performance aggregates. Conditional best speedup is aggregated over successful
+benchmark/subset evaluations with a geometric mean; `speedup_at_5` is its value
+for the full set of five attempts.
 
 Across the analysis scripts, ratios from different benchmarks, dataset sizes, prompts, frameworks, or attempts are combined with geometric means. Repeated runtime samples are averaged using arithmetic means. The translation-selection procedure is intentionally exempt from this convention.
 

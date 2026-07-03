@@ -4,7 +4,7 @@ set -uo pipefail
 
 BUILD_DIR=${BUILD_DIR:-build}
 DATASET_SIZE=${DATASET_SIZE:-LARGE}
-DATA_TYPE=${DATA_TYPE:-FLOAT}
+DATA_TYPE=${DATA_TYPE:-DOUBLE}
 
 MODULE_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)

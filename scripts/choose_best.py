@@ -13,12 +13,16 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
+DEFAULT_DATA_TYPE = "DOUBLE"
+
+
 @dataclass
 class Candidate:
     """Holds aggregated data for a single framework/algorithm repetition."""
 
     framework: str
     algorithm: str
+    data_type: str
     repetition: int
     validity_score: int
     relative_gap: float
@@ -31,6 +35,7 @@ class TimeReportKey:
 
     framework: str
     algorithm: str
+    data_type: str
     repetition: int
     dataset_size: str
 
@@ -41,6 +46,7 @@ class ValidationReportKey:
 
     framework: str
     algorithm: str
+    data_type: str
     repetition: int
 
 
@@ -49,6 +55,7 @@ class BaselineKey:
     """Key for best candidate entries."""
 
     algorithm: str
+    data_type: str
     dataset_size: str
 
 
@@ -58,6 +65,7 @@ class BestCandidateKey:
 
     framework: str
     algorithm: str
+    data_type: str
 
 
 VALID_STATUS_TRUE = {"valid", "true"}
@@ -87,6 +95,12 @@ def get_validation_status(row: Mapping[str, str]) -> str | None:
     """Return status from either the new status column or the legacy valid column."""
 
     return row.get("status") or row.get("valid")
+
+
+def get_data_type(row: Mapping[str, str]) -> str:
+    """Return the benchmark datatype, defaulting legacy reports to DOUBLE."""
+
+    return (row.get("data_type") or DEFAULT_DATA_TYPE).strip() or DEFAULT_DATA_TYPE
 
 
 def extract_dataset_size(path: Path) -> Optional[str]:
@@ -128,6 +142,7 @@ def load_time_reports(
                 try:
                     framework = row["framework"].strip()
                     algorithm = row["algorithm"].strip()
+                    data_type = get_data_type(row)
                 except KeyError as exc:
                     raise KeyError(f"Missing column {exc} in {csv_path}") from exc
 
@@ -160,13 +175,18 @@ def load_time_reports(
                 key = TimeReportKey(
                     framework=framework,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                     dataset_size=dataset_size,
                 )
                 grouped[key].append(time_value)
                 if framework == "c":
                     baseline_raw[
-                        BaselineKey(algorithm=algorithm, dataset_size=dataset_size)
+                        BaselineKey(
+                            algorithm=algorithm,
+                            data_type=data_type,
+                            dataset_size=dataset_size,
+                        )
                     ].append(time_value)
 
     mean_times = {key: sum(values) / len(values) for key, values in grouped.items()}
@@ -191,6 +211,7 @@ def load_validation_reports(
                 try:
                     framework = row["framework"].strip()
                     algorithm = row["algorithm"].strip()
+                    data_type = get_data_type(row)
                 except KeyError as exc:
                     raise KeyError(f"Missing column {exc} in {csv_path}") from exc
 
@@ -213,6 +234,7 @@ def load_validation_reports(
                 key = ValidationReportKey(
                     framework=framework,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                 )
                 validity_scores[key] += 1 if is_valid else 0
@@ -225,6 +247,7 @@ def compute_relative_gap(
     baseline: Mapping[BaselineKey, float],
     framework: str,
     algorithm: str,
+    data_type: str,
     repetition: int,
     dataset_sizes: Iterable[str],
 ) -> float:
@@ -233,7 +256,11 @@ def compute_relative_gap(
     deltas: List[float] = []
     for dataset_size in dataset_sizes:
         baseline_time = baseline.get(
-            BaselineKey(algorithm=algorithm, dataset_size=dataset_size)
+            BaselineKey(
+                algorithm=algorithm,
+                data_type=data_type,
+                dataset_size=dataset_size,
+            )
         )
         if baseline_time is None:
             continue
@@ -242,6 +269,7 @@ def compute_relative_gap(
             TimeReportKey(
                 framework=framework,
                 algorithm=algorithm,
+                data_type=data_type,
                 repetition=repetition,
                 dataset_size=dataset_size,
             )
@@ -297,22 +325,24 @@ def select_best_candidates(
     best: Dict[BestCandidateKey, Candidate] = {}
     tracked_sizes = list(dataset_sizes)
     for validation_key, validity_score in validity_scores.items():
-        framework, algorithm, repetition = (
+        framework, algorithm, data_type, repetition = (
             validation_key.framework,
             validation_key.algorithm,
+            validation_key.data_type,
             validation_key.repetition,
         )
         if framework == "c":
             continue
 
         relative_gap = compute_relative_gap(
-            mean_times, baseline, framework, algorithm, repetition, tracked_sizes
+            mean_times, baseline, framework, algorithm, data_type, repetition, tracked_sizes
         )
         mean_by_size = {
             size: mean_times.get(
                 TimeReportKey(
                     framework=framework,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                     dataset_size=size,
                 )
@@ -323,13 +353,18 @@ def select_best_candidates(
         candidate = Candidate(
             framework=framework,
             algorithm=algorithm,
+            data_type=data_type,
             repetition=repetition,
             validity_score=validity_score,
             relative_gap=relative_gap,
             mean_times=mean_by_size,
         )
 
-        key = BestCandidateKey(framework=framework, algorithm=algorithm)
+        key = BestCandidateKey(
+            framework=framework,
+            algorithm=algorithm,
+            data_type=data_type,
+        )
         current = best.get(key)
         if is_better_candidate(candidate, current):
             best[key] = candidate
@@ -346,16 +381,20 @@ def emit_baseline_table(
         return
 
     print("# Baseline mean runtimes (framework=c)")
-    header = ["algorithm"] + [f"time_{size}" for size in dataset_sizes]
+    header = ["algorithm", "data_type"] + [f"time_{size}" for size in dataset_sizes]
     print(",".join(header))
 
-    for algorithm in sorted({key.algorithm for key in baseline.keys()}):
-        row = [algorithm]
+    for algorithm, data_type in sorted({(key.algorithm, key.data_type) for key in baseline.keys()}):
+        row = [algorithm, data_type]
         for dataset_size in dataset_sizes:
             row.append(
                 format_float(
                     baseline.get(
-                        BaselineKey(algorithm=algorithm, dataset_size=dataset_size)
+                        BaselineKey(
+                            algorithm=algorithm,
+                            data_type=data_type,
+                            dataset_size=dataset_size,
+                        )
                     )
                 )
             )
@@ -377,6 +416,7 @@ def emit_best_candidates(
     header = [
         "framework",
         "algorithm",
+        "data_type",
         "repetition",
         "validity_score",
         "relative_gap",
@@ -384,7 +424,7 @@ def emit_best_candidates(
     print(",".join(header))
 
     for key in sorted(
-        candidates.keys(), key=lambda item: (item.algorithm, item.framework)
+        candidates.keys(), key=lambda item: (item.algorithm, item.data_type, item.framework)
     ):
         candidate = candidates[key]
         relative_gap = (
@@ -395,6 +435,7 @@ def emit_best_candidates(
         row = [
             candidate.framework,
             candidate.algorithm,
+            candidate.data_type,
             str(candidate.repetition),
             str(candidate.validity_score),
             relative_gap,

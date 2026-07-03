@@ -27,6 +27,7 @@ from analyze_results import (
     collect_status_tokens,
     compute_speedups,
     filter_algorithms,
+    filter_data_types,
     filter_dataset_sizes,
     filter_frameworks,
     geometric_mean,
@@ -47,7 +48,7 @@ def validate_five_attempts(validation: pd.DataFrame) -> None:
 
     expected = set(range(1, EXPECTED_ATTEMPTS + 1))
     incomplete: list[str] = []
-    for key, group in validation.groupby(["framework", "version", "algorithm"]):
+    for key, group in validation.groupby(["data_type", "framework", "version", "algorithm"]):
         actual = set(group["repetition"].unique())
         if actual != expected:
             incomplete.append(f"{key}: {sorted(actual)}")
@@ -70,14 +71,14 @@ def build_attempt_table(
     speedup_groups = {
         key: group
         for key, group in speedups.groupby(
-            ["framework", "version", "algorithm", "repetition"]
+            ["data_type", "framework", "version", "algorithm", "repetition"]
         )
     }
     records: list[dict[str, object]] = []
-    keys = ["framework", "version", "algorithm", "repetition"]
+    keys = ["data_type", "framework", "version", "algorithm", "repetition"]
 
     for key, group in validation.groupby(keys):
-        framework, prompt, benchmark, repetition = key
+        data_type, framework, prompt, benchmark, repetition = key
         present_sizes = set(group["dataset_size"].astype(str))
         validated = present_sizes == expected_sizes and bool(group["valid"].all())
         statuses = collect_status_tokens(group["status"])
@@ -102,6 +103,7 @@ def build_attempt_table(
         )
         records.append(
             {
+                "data_type": data_type,
                 "framework": framework,
                 "prompt": prompt,
                 "benchmark": benchmark,
@@ -130,9 +132,10 @@ def compute_failure_counts(attempts: pd.DataFrame) -> pd.DataFrame:
     """Count attempt-level failures; reason columns intentionally may overlap."""
 
     rows: list[dict[str, object]] = []
-    for (framework, prompt), group in attempts.groupby(["framework", "prompt"]):
+    for (data_type, framework, prompt), group in attempts.groupby(["data_type", "framework", "prompt"]):
         rows.append(
             {
+                "data_type": data_type,
                 "framework": framework,
                 "prompt": prompt,
                 "attempt_count": len(group),
@@ -153,8 +156,8 @@ def enumerate_best_of_k(attempts: pd.DataFrame) -> pd.DataFrame:
     """Enumerate all repetition subsets for k=1..5 for every benchmark."""
 
     records: list[dict[str, object]] = []
-    group_keys = ["framework", "prompt", "benchmark"]
-    for (framework, prompt, benchmark), group in attempts.groupby(group_keys):
+    group_keys = ["data_type", "framework", "prompt", "benchmark"]
+    for (data_type, framework, prompt, benchmark), group in attempts.groupby(group_keys):
         ordered = group.sort_values("repetition").reset_index(drop=True)
         if len(ordered) != EXPECTED_ATTEMPTS:
             raise ValueError(
@@ -173,6 +176,7 @@ def enumerate_best_of_k(attempts: pd.DataFrame) -> pd.DataFrame:
                 )
                 records.append(
                     {
+                        "data_type": data_type,
                         "framework": framework,
                         "prompt": prompt,
                         "benchmark": benchmark,
@@ -198,8 +202,8 @@ def summarize_best_of_k(subsets: pd.DataFrame) -> pd.DataFrame:
     """Aggregate exact subset outcomes by framework, prompt, and budget."""
 
     rows: list[dict[str, object]] = []
-    for (framework, prompt, k), group in subsets.groupby(
-        ["framework", "prompt", "k"]
+    for (data_type, framework, prompt, k), group in subsets.groupby(
+        ["data_type", "framework", "prompt", "k"]
     ):
         successful = group[group["has_validated_candidate"]]
         conditional = successful["conditional_best_speedup"].dropna()
@@ -207,6 +211,7 @@ def summarize_best_of_k(subsets: pd.DataFrame) -> pd.DataFrame:
         expected_speedup = geometric_mean(fallback_speedups)
         rows.append(
             {
+                "data_type": data_type,
                 "framework": framework,
                 "prompt": prompt,
                 "k": int(k),
@@ -238,17 +243,18 @@ def summarize_framework_prompt(
     """Build the requested coverage and performance summary table."""
 
     budget_at_5 = budget[budget["k"] == EXPECTED_ATTEMPTS].set_index(
-        ["framework", "prompt"]
+        ["data_type", "framework", "prompt"]
     )
     speedup_at_5 = budget_at_5["conditional_best_speedup"].to_dict()
     rows: list[dict[str, object]] = []
-    for (framework, prompt), group in attempts.groupby(["framework", "prompt"]):
+    for (data_type, framework, prompt), group in attempts.groupby(["data_type", "framework", "prompt"]):
         eligible = group[group["performance_eligible"]]
         values = eligible["attempt_speedup"].dropna()
         q1 = quantile_or_nan(values, 0.25)
         q3 = quantile_or_nan(values, 0.75)
         rows.append(
             {
+                "data_type": data_type,
                 "framework": framework,
                 "prompt": prompt,
                 "attempt_count": len(group),
@@ -263,7 +269,7 @@ def summarize_framework_prompt(
                 "speedup_q1": q1,
                 "speedup_q3": q3,
                 "speedup_iqr": q3 - q1,
-                "speedup_at_5": speedup_at_5.get((framework, prompt), math.nan),
+                "speedup_at_5": speedup_at_5.get((data_type, framework, prompt), math.nan),
                 "contributing_benchmark_count": eligible["benchmark"].nunique(),
                 "benchmark_count": group["benchmark"].nunique(),
                 "baseline_framework": BASELINE_FRAMEWORK,
@@ -276,7 +282,9 @@ def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
     """Plot success probability and expected speedup as budget increases."""
 
     prompts = sorted(budget["prompt"].unique())
-    frameworks = sorted(budget["framework"].unique())
+    include_data_type = "data_type" in budget.columns and budget["data_type"].nunique(dropna=False) > 1
+    series_cols = ["data_type", "framework"] if include_data_type else ["framework"]
+    series_keys = list(budget[series_cols].drop_duplicates().itertuples(index=False, name=None))
     fig, axes = plt.subplots(
         2,
         len(prompts),
@@ -286,31 +294,41 @@ def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
         squeeze=False,
     )
     colors = plt.get_cmap("tab10")
-    framework_colors = {fw: colors(i) for i, fw in enumerate(frameworks)}
+    series_colors = {key: colors(i) for i, key in enumerate(series_keys)}
     marker_shapes = ["o", "s", "^", "D", "v", "P", "X"]
-    framework_markers = {
-        fw: marker_shapes[i % len(marker_shapes)] for i, fw in enumerate(frameworks)
+    series_markers = {
+        key: marker_shapes[i % len(marker_shapes)] for i, key in enumerate(series_keys)
     }
 
     for column, prompt in enumerate(prompts):
         prompt_data = budget[budget["prompt"] == prompt]
-        for framework in frameworks:
-            data = prompt_data[prompt_data["framework"] == framework].sort_values("k")
+        for key in series_keys:
+            if include_data_type:
+                data_type, framework = key
+                data = prompt_data[
+                    (prompt_data["data_type"] == data_type)
+                    & (prompt_data["framework"] == framework)
+                ].sort_values("k")
+                label = f"{data_type} {framework}"
+            else:
+                (framework,) = key
+                data = prompt_data[prompt_data["framework"] == framework].sort_values("k")
+                label = framework
             if data.empty:
                 continue
             axes[0, column].plot(
                 data["k"],
                 data["expected_speedup_with_c_fallback"],
-                marker=framework_markers[framework],
-                color=framework_colors[framework],
-                label=framework,
+                marker=series_markers[key],
+                color=series_colors[key],
+                label=label,
             )
             axes[1, column].plot(
                 data["k"],
                 data["probability_validated_candidate"] * 100.0,
-                marker=framework_markers[framework],
-                color=framework_colors[framework],
-                label=framework,
+                marker=series_markers[key],
+                color=series_colors[key],
+                label=label,
             )
         axes[0, column].axhline(1.0, color="black", linewidth=0.8, linestyle="--")
         axes[0, column].set_title(prompt)
@@ -324,7 +342,7 @@ def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
     axes[1, 0].set_ylim(bottom=0.0)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc="upper center", ncol=len(frameworks))
+        fig.legend(handles, labels, loc="upper center", ncol=max(1, len(series_keys)))
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=600, bbox_inches="tight")
@@ -337,6 +355,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("optimization_path")
     parser.add_argument("--output-dir", default="results/plots/attempt_analysis")
     parser.add_argument("--dataset-size", dest="dataset_sizes", action="append")
+    parser.add_argument("--data-type", dest="data_types", action="append")
     parser.add_argument("--no-framework", action="append")
     parser.add_argument(
         "--include-tuning-benchmarks",
@@ -378,6 +397,7 @@ def main() -> None:
     optimization_validation = normalize_version_column(optimization_validation)
 
     dataset_filter = normalize_cli_args(args.dataset_sizes)
+    data_type_filter = normalize_cli_args(args.data_types)
     excluded_frameworks = normalize_cli_args(args.no_framework)
     excluded_algorithms = (
         [] if args.include_tuning_benchmarks else list(TUNING_BENCHMARKS)
@@ -391,6 +411,11 @@ def main() -> None:
         optimization_validation = filter_dataset_sizes(
             optimization_validation, dataset_filter
         )
+    if data_type_filter:
+        translation_times = filter_data_types(translation_times, data_type_filter)
+        optimization_times = filter_data_types(optimization_times, data_type_filter)
+        translation_validation = filter_data_types(translation_validation, data_type_filter)
+        optimization_validation = filter_data_types(optimization_validation, data_type_filter)
     if excluded_frameworks:
         optimization_times = filter_frameworks(
             optimization_times, excluded_frameworks
@@ -446,7 +471,7 @@ def main() -> None:
     failures = compute_failure_counts(attempts)
     budget = budget.merge(
         failures.drop(columns=["benchmark_count"]),
-        on=["framework", "prompt"],
+        on=["data_type", "framework", "prompt"],
         how="left",
     )
     summary = summarize_framework_prompt(attempts, budget)
@@ -456,9 +481,9 @@ def main() -> None:
     failures_path = output_dir / "failure_counts.csv"
     budget_path = output_dir / "best_of_k.csv"
     plot_path = output_dir / f"best_of_k_budget.{args.format}"
-    summary.sort_values(["framework", "prompt"]).to_csv(summary_path, index=False)
-    failures.sort_values(["framework", "prompt"]).to_csv(failures_path, index=False)
-    budget.sort_values(["framework", "prompt", "k"]).to_csv(budget_path, index=False)
+    summary.sort_values(["data_type", "framework", "prompt"]).to_csv(summary_path, index=False)
+    failures.sort_values(["data_type", "framework", "prompt"]).to_csv(failures_path, index=False)
+    budget.sort_values(["data_type", "framework", "prompt", "k"]).to_csv(budget_path, index=False)
     plot_budget_curves(budget, plot_path)
 
     print(f"Wrote framework/prompt summary to {summary_path}")

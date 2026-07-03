@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
+DEFAULT_DATA_TYPE = "DOUBLE"
+
+
 @dataclass
 class Candidate:
     """Holds aggregated data for a single framework/algorithm repetition."""
@@ -20,6 +23,7 @@ class Candidate:
     framework: str
     version: str
     algorithm: str
+    data_type: str
     repetition: int
     validity_score: int
     aggregate_time: float
@@ -33,6 +37,7 @@ class TimeReportKey:
     framework: str
     version: str
     algorithm: str
+    data_type: str
     repetition: int
     dataset_size: str
 
@@ -44,6 +49,7 @@ class ValidationReportKey:
     framework: str
     version: str
     algorithm: str
+    data_type: str
     repetition: int
 
 
@@ -54,6 +60,7 @@ class BestCandidateKey:
     framework: str
     version: str
     algorithm: str
+    data_type: str
 
 
 @dataclass(unsafe_hash=True)
@@ -62,6 +69,7 @@ class UnframeworkedBestKey:
 
     version: str
     algorithm: str
+    data_type: str
 
 
 @dataclass(unsafe_hash=True)
@@ -69,6 +77,7 @@ class TotalBestKey:
     """Key for total best entries."""
 
     algorithm: str
+    data_type: str
 
 
 VALID_STATUS_TRUE = {"valid", "true"}
@@ -98,6 +107,12 @@ def get_validation_status(row: Mapping[str, str]) -> str | None:
     """Return status from either the new status column or the legacy valid column."""
 
     return row.get("status") or row.get("valid")
+
+
+def get_data_type(row: Mapping[str, str]) -> str:
+    """Return the benchmark datatype, defaulting legacy reports to DOUBLE."""
+
+    return (row.get("data_type") or DEFAULT_DATA_TYPE).strip() or DEFAULT_DATA_TYPE
 
 
 def extract_dataset_size(path: Path) -> Optional[str]:
@@ -148,6 +163,7 @@ def load_time_reports(
                     framework = row["framework"].strip()
                     version = row["version"].strip()
                     algorithm = row["algorithm"].strip()
+                    data_type = get_data_type(row)
                 except KeyError as exc:
                     raise KeyError(f"Missing column {exc} in {csv_path}") from exc
 
@@ -181,6 +197,7 @@ def load_time_reports(
                     framework=framework,
                     version=version,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                     dataset_size=dataset_size,
                 )
@@ -209,6 +226,7 @@ def load_validation_reports(
                     framework = row["framework"].strip()
                     version = row["version"].strip()
                     algorithm = row["algorithm"].strip()
+                    data_type = get_data_type(row)
                 except KeyError as exc:
                     raise KeyError(f"Missing column {exc} in {csv_path}") from exc
 
@@ -232,6 +250,7 @@ def load_validation_reports(
                     framework=framework,
                     version=version,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                 )
                 validity_scores[key] += 1 if is_valid else 0
@@ -274,10 +293,11 @@ def select_best_candidates(
     best: Dict[BestCandidateKey, Candidate] = {}
     tracked_sizes = list(dataset_sizes)
     for validation_key, validity_score in validity_scores.items():
-        framework, version, algorithm, repetition = (
+        framework, version, algorithm, data_type, repetition = (
             validation_key.framework,
             validation_key.version,
             validation_key.algorithm,
+            validation_key.data_type,
             validation_key.repetition,
         )
 
@@ -287,6 +307,7 @@ def select_best_candidates(
                     framework=framework,
                     version=version,
                     algorithm=algorithm,
+                    data_type=data_type,
                     repetition=repetition,
                     dataset_size=size,
                 )
@@ -304,6 +325,7 @@ def select_best_candidates(
             framework=framework,
             version=version,
             algorithm=algorithm,
+            data_type=data_type,
             repetition=repetition,
             validity_score=validity_score,
             aggregate_time=aggregate_time,
@@ -314,6 +336,7 @@ def select_best_candidates(
             framework=framework,
             version=version,
             algorithm=algorithm,
+            data_type=data_type,
         )
 
         current = best.get(key)
@@ -331,8 +354,12 @@ def select_unframeworked_bests(
     best: Dict[UnframeworkedBestKey, Candidate] = {}
 
     for key, candidate in candidates.items():
-        version, algorithm = key.version, key.algorithm
-        unframeworked_key = UnframeworkedBestKey(version=version, algorithm=algorithm)
+        version, algorithm, data_type = key.version, key.algorithm, key.data_type
+        unframeworked_key = UnframeworkedBestKey(
+            version=version,
+            algorithm=algorithm,
+            data_type=data_type,
+        )
         current = best.get(unframeworked_key)
         if is_better_candidate(candidate, current):
             best[unframeworked_key] = candidate
@@ -348,8 +375,8 @@ def select_total_bests(
     best: Dict[TotalBestKey, Candidate] = {}
 
     for key, candidate in candidates.items():
-        algorithm = key.algorithm
-        total_best_key = TotalBestKey(algorithm=algorithm)
+        algorithm, data_type = key.algorithm, key.data_type
+        total_best_key = TotalBestKey(algorithm=algorithm, data_type=data_type)
         current = best.get(total_best_key)
         if is_better_candidate(candidate, current):
             best[total_best_key] = candidate
@@ -380,6 +407,7 @@ def emit_best_candidates(
         "framework",
         "version",
         "algorithm",
+        "data_type",
         "repetition",
         "validity_score",
         "aggregate_time",
@@ -387,7 +415,7 @@ def emit_best_candidates(
     print(",".join(header))
 
     for key in sorted(
-        candidates.keys(), key=lambda item: (item.algorithm, item.framework)
+        candidates.keys(), key=lambda item: (item.algorithm, item.data_type, item.framework)
     ):
         candidate = candidates[key]
         aggregate_time = format_aggregate_time(candidate.aggregate_time)
@@ -395,6 +423,7 @@ def emit_best_candidates(
             candidate.framework,
             candidate.version,
             candidate.algorithm,
+            candidate.data_type,
             str(candidate.repetition),
             str(candidate.validity_score),
             aggregate_time,
@@ -419,6 +448,7 @@ def emit_unframeworked_bests(
     header = [
         "version",
         "algorithm",
+        "data_type",
         "framework",
         "repetition",
         "validity_score",
@@ -427,13 +457,14 @@ def emit_unframeworked_bests(
     print(",".join(header))
 
     for key in sorted(
-        candidates.keys(), key=lambda item: (item.algorithm, item.version)
+        candidates.keys(), key=lambda item: (item.algorithm, item.data_type, item.version)
     ):
         candidate = candidates[key]
         aggregate_time = format_aggregate_time(candidate.aggregate_time)
         row = [
             candidate.version,
             candidate.algorithm,
+            candidate.data_type,
             candidate.framework,
             str(candidate.repetition),
             str(candidate.validity_score),
@@ -458,6 +489,7 @@ def emit_total_bests(
     print("# Best versions per algorithm")
     header = [
         "algorithm",
+        "data_type",
         "version",
         "framework",
         "repetition",
@@ -466,11 +498,12 @@ def emit_total_bests(
     ] + [f"time_{size}" for size in dataset_sizes]
     print(",".join(header))
 
-    for key in sorted(candidates.keys(), key=lambda item: item.algorithm):
+    for key in sorted(candidates.keys(), key=lambda item: (item.algorithm, item.data_type)):
         candidate = candidates[key]
         aggregate_time = format_aggregate_time(candidate.aggregate_time)
         row = [
             candidate.algorithm,
+            candidate.data_type,
             candidate.version,
             candidate.framework,
             str(candidate.repetition),

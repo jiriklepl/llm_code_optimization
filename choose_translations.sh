@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export DATA_TYPE="${DATA_TYPE:-FLOAT}"
+export DATA_TYPE="${DATA_TYPE:-DOUBLE}"
 provider="${GPT_QUERYING_PROVIDER:-openai}"
 
 set -euo pipefail
@@ -45,7 +45,7 @@ rm -rf generated
 cleanup "$mode" "all" "translation"
 generate --rep "${reps}" --parse --provider "${provider}"
 
-python3 "$choose_best_script" "$results_folder" | awk -F, '/# Best/{start=1; next} start{ print $1, $2, $3, $4 }' | while read -r framework algorithm repetition validity_score; do
+python3 "$choose_best_script" "$results_folder" | awk -F, -v data_type="${DATA_TYPE}" '/# Best/{start=1; next} start && ($1 != "framework") && ($3 == data_type) { print $1, $2, $4, $5 }' | while read -r framework algorithm repetition validity_score; do
 	if [[ -z "$framework" || -z "$algorithm" || -z "$repetition" || "$framework" == "framework" ]]; then
 		continue
 	fi

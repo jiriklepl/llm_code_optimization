@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export DATA_TYPE="${DATA_TYPE:-FLOAT}"
+export DATA_TYPE="${DATA_TYPE:-DOUBLE}"
 CACHE=${CACHE:-}
 provider="${GPT_QUERYING_PROVIDER:-openai}"
 
@@ -10,6 +10,21 @@ reps="${GPT_QUERYING_REPETITIONS:-${GPT_QUERYING_REPS:-5}}"
 
 . functions
 
+ensure_data_type_column() {
+	local csv_file="$1"
+	if [[ ! -f "${csv_file}" ]]; then
+		return
+	fi
+	local header
+	header=$(head -n1 "${csv_file}")
+	if [[ ",${header}," == *",data_type,"* ]]; then
+		return
+	fi
+	local tmp_file
+	tmp_file=$(mktemp)
+	awk -v data_type="${DATA_TYPE}" 'NR == 1 { print $0 ",data_type"; next } { print $0 "," data_type }' "${csv_file}" > "${tmp_file}"
+	mv "${tmp_file}" "${csv_file}"
+}
 
 cleanup "do"
 generate --rep "${reps}" --parse --provider "${provider}"
@@ -139,12 +154,15 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 	output_file="${results_dir}/output_${DATASET_SIZE}.out"
 
 	if ! [[ -f "${validation_file}" ]]; then
-		echo "framework,version,algorithm,time_s,speedup,status,repetition,dataset_size" > "${validation_file}"
+		echo "framework,version,algorithm,time_s,speedup,status,repetition,dataset_size,data_type" > "${validation_file}"
 	fi
 
 	if ! [[ -f "${times_file}" ]]; then
-		echo "framework,version,algorithm,run,time_s,repetition,dataset_size" > "${times_file}"
+		echo "framework,version,algorithm,run,time_s,repetition,dataset_size,data_type" > "${times_file}"
 	fi
+
+	ensure_data_type_column "${validation_file}"
+	ensure_data_type_column "${times_file}"
 
 	for framework in "${FRAMEWORKS_TO_RUN[@]}"; do
 		for rep in $(seq "${reps}"); do
@@ -157,22 +175,22 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 
 				for algorithm in ${algorithms}; do
 					actual_runs=${runs}
-					if grep -q "^${framework},${version},${algorithm},.*,${rep},${DATASET_SIZE}$" "${validation_file}"; then
-						validation=$(grep "^${framework},${version},${algorithm},.*,${rep},${DATASET_SIZE}$" "${validation_file}")
-						actual_runs=$(( runs - $(grep -c "^${framework},${version},${algorithm},.*,${rep},${DATASET_SIZE}$" "${times_file}") ))
+					if grep -q "^${framework},${version},${algorithm},.*,${rep},${DATASET_SIZE},${DATA_TYPE}$" "${validation_file}"; then
+						validation=$(grep "^${framework},${version},${algorithm},.*,${rep},${DATASET_SIZE},${DATA_TYPE}$" "${validation_file}")
+						actual_runs=$(( runs - $(grep -c "^${framework},${version},${algorithm},.*,.*,${rep},${DATASET_SIZE},${DATA_TYPE}$" "${times_file}") ))
 					else
-						validation=$(check_optimization "${algorithm}" "${framework}" "${version}" "${abs_tolerance}" "${rel_tolerance}" | awk '{print $0 ",'"${rep}"','"${DATASET_SIZE}"'"}' | tee -a "${validation_file}")
+						validation=$(check_optimization "${algorithm}" "${framework}" "${version}" "${abs_tolerance}" "${rel_tolerance}" | awk '{print $0 ",'"${rep}"','"${DATASET_SIZE}"','"${DATA_TYPE}"'"}' | tee -a "${validation_file}")
 						echo "${validation}"
 					fi
 
 					if [[ ${actual_runs} -le 0 ]]; then
-						echo "Skipping ${framework} ${version} ${algorithm} repetition ${rep} for dataset size ${DATASET_SIZE} (already done)." | tee -a "${output_file}"
+						echo "Skipping ${framework} ${version} ${algorithm} repetition ${rep} for dataset size ${DATASET_SIZE}, data type ${DATA_TYPE} (already done)." | tee -a "${output_file}"
 						continue
 					fi
 
 					status_column=$(echo "${validation}" | awk -F, '{print $6}')
 					if [[ ${status_column} == "true" || ${status_column} == "valid" ]]; then
-						run "${algorithm}" "${framework}" "${version}" "${runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"'"}' | tee -a "${times_file}"
+						run "${algorithm}" "${framework}" "${version}" "${runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"','"${DATA_TYPE}"'"}' | tee -a "${times_file}"
 					fi
 				done
 			done 2>> "${error_file}" | tee -a "${output_file}"

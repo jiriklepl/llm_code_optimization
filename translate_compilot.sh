@@ -1,6 +1,8 @@
 #!/bin/bash
 
-find results/compilot/ -mindepth 1 -exec ./scripts/adapt-compilot.py {} --output-root=results/translation/20260408/tiramisu \;
+export DATA_TYPE="${DATA_TYPE:-DOUBLE}"
+
+find results/compilot/ -mindepth 1 -exec ./scripts/adapt-compilot.py {} --output-root=results/translation/20260408/tiramisu --data-type="${DATA_TYPE}" \;
 
 find results/translation/20260408/tiramisu/ -mindepth 1 -name '*_XLARGE.csv' | while read -r file; do
 	sed -i 's/,XLARGE/,EXTRALARGE/g' "$file"

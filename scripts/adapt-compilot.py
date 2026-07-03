@@ -25,6 +25,7 @@ TIMES_HEADER = [
     "time_s",
     "repetition",
     "dataset_size",
+    "data_type",
 ]
 
 VALIDATION_HEADER = [
@@ -35,6 +36,7 @@ VALIDATION_HEADER = [
     "status",
     "repetition",
     "dataset_size",
+    "data_type",
 ]
 
 ALGORITHM_RENAMES = {
@@ -83,6 +85,11 @@ def parse_args() -> argparse.Namespace:
         "--run-id",
         help="Optional run identifier; defaults to a timestamp derived from the input filename.",
     )
+    parser.add_argument(
+        "--data-type",
+        default="DOUBLE",
+        help="Datatype used for the adapted benchmark measurements (default: DOUBLE).",
+    )
     return parser.parse_args()
 
 
@@ -126,7 +133,7 @@ def read_entries(path: Path) -> List[Entry]:
     return entries
 
 
-def write_times(entries: Iterable[Entry], output_path: Path) -> None:
+def write_times(entries: Iterable[Entry], output_path: Path, data_type: str) -> None:
     with output_path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=TIMES_HEADER, lineterminator="\n"
@@ -143,11 +150,12 @@ def write_times(entries: Iterable[Entry], output_path: Path) -> None:
                         "time_s": f"{time_s:.6f}",
                         "repetition": 1,
                         "dataset_size": entry.dataset_size,
+                        "data_type": data_type,
                     }
                 )
 
 
-def write_validation(entries: Iterable[Entry], output_path: Path) -> None:
+def write_validation(entries: Iterable[Entry], output_path: Path, data_type: str) -> None:
     with output_path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=VALIDATION_HEADER, lineterminator="\n"
@@ -165,6 +173,7 @@ def write_validation(entries: Iterable[Entry], output_path: Path) -> None:
                     "status": "valid",
                     "repetition": 1,
                     "dataset_size": entry.dataset_size,
+                    "data_type": data_type,
                 }
             )
 
@@ -189,8 +198,8 @@ def main() -> None:
     times_path = output_dir / f"times_{dataset_size}.csv"
     validation_path = output_dir / f"validation_{dataset_size}.csv"
 
-    write_times(entries, times_path)
-    write_validation(entries, validation_path)
+    write_times(entries, times_path, args.data_type)
+    write_validation(entries, validation_path, args.data_type)
 
     print(f"Wrote {times_path}")
     print(f"Wrote {validation_path}")

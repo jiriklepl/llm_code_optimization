@@ -7,7 +7,7 @@ cmake -E make_directory build
 cd build
 
 export DATASET_SIZE=${DATASET_SIZE:-LARGE}
-export DATA_TYPE=${DATA_TYPE:-FLOAT}
+export DATA_TYPE=${DATA_TYPE:-DOUBLE}
 export NPROC=${NPROC:-$(nproc)}
 
 if [ "${1:-}" == "clean" ]; then

@@ -4,7 +4,7 @@ set -euo pipefail
 
 export BUILD_DIR=${BUILD_DIR:-build}
 export DATASET_SIZE=${DATASET_SIZE:-LARGE}
-export DATA_TYPE=${DATA_TYPE:-FLOAT}
+export DATA_TYPE=${DATA_TYPE:-DOUBLE}
 export NPROC=${NPROC:-$(nproc)}
 export POLLY_C_COMPILER=${POLLY_C_COMPILER:-clang-21}
 

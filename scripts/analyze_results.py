@@ -15,6 +15,8 @@ from matplotlib.patches import Rectangle
 
 
 BASELINE_FRAMEWORK = "c"
+DEFAULT_DATA_TYPE = "DOUBLE"
+SETTING_COLUMNS = ["data_type"]
 TUNING_BENCHMARKS = ("2mm", "floyd-warshall", "gemm", "heat-3d")
 VALID_STATUS_TRUE = {"valid", "true"}
 VALIDITY_FAILURE_STATUSES = {"invalid", "false", "validity_error"}
@@ -88,6 +90,55 @@ def infer_dataset_size(path: Path) -> str | None:
     return stem.split("_")[-1]
 
 
+def normalize_data_type_value(value: object) -> str:
+    """Normalize benchmark datatype values, defaulting legacy reports to DOUBLE."""
+
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or DEFAULT_DATA_TYPE
+    if pd.isna(value):
+        return DEFAULT_DATA_TYPE
+    return str(value).strip() or DEFAULT_DATA_TYPE
+
+
+def normalize_data_type_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with a normalized data_type column."""
+
+    out = df.copy()
+    if "data_type" not in out.columns:
+        out["data_type"] = DEFAULT_DATA_TYPE
+    out["data_type"] = out["data_type"].apply(normalize_data_type_value)
+    return out
+
+
+def present_setting_columns(df: pd.DataFrame | None) -> list[str]:
+    """Return benchmark setting columns present in the given DataFrame."""
+
+    if df is None:
+        return []
+    return [col for col in SETTING_COLUMNS if col in df.columns]
+
+
+def identity_columns(
+    df: pd.DataFrame | None = None, *, include_repetition: bool = True
+) -> list[str]:
+    """Columns identifying a benchmark result, excluding dataset_size."""
+
+    cols = present_setting_columns(df)
+    cols += ["framework", "version", "algorithm"]
+    if include_repetition:
+        cols.append("repetition")
+    return cols
+
+
+def result_key_columns(
+    df: pd.DataFrame | None = None, *, include_repetition: bool = True
+) -> list[str]:
+    """Columns identifying one benchmark result for a dataset size."""
+
+    return identity_columns(df, include_repetition=include_repetition) + ["dataset_size"]
+
+
 def collect_prefixed_files(root: Path, prefix: str) -> list[Path]:
     """Return all CSVs under root starting with the given prefix."""
 
@@ -128,6 +179,17 @@ def filter_dataset_sizes(
     return df[df["dataset_size"].astype(str).isin(allowed)].copy()
 
 
+def filter_data_types(
+    df: pd.DataFrame | None, allowed_data_types: Sequence[str] | None
+) -> pd.DataFrame | None:
+    """Keep only rows whose data_type matches the allowed list."""
+
+    if df is None or not allowed_data_types or "data_type" not in df.columns:
+        return df
+    allowed = {normalize_data_type_value(data_type) for data_type in allowed_data_types}
+    return df[df["data_type"].apply(normalize_data_type_value).isin(allowed)].copy()
+
+
 def filter_frameworks(
     df: pd.DataFrame | None, disallowed_frameworks: Sequence[str] | None
 ) -> pd.DataFrame | None:
@@ -166,6 +228,7 @@ def select_best_standard_baseline(
     if times_df.empty or not required_sizes:
         return pd.DataFrame(
             columns=[
+                "data_type",
                 "algorithm",
                 "dataset_size",
                 "baseline_time_s",
@@ -176,6 +239,7 @@ def select_best_standard_baseline(
         )
 
     df = times_df.copy()
+    df = normalize_data_type_column(df)
     df["dataset_size"] = df["dataset_size"].astype(str)
     df["version_norm"] = df["version"].apply(normalize_version_value)
     df = df[
@@ -185,6 +249,7 @@ def select_best_standard_baseline(
     ].copy()
     empty_template = pd.DataFrame(
         columns=[
+            "data_type",
             "algorithm",
             "dataset_size",
             "baseline_time_s",
@@ -197,26 +262,33 @@ def select_best_standard_baseline(
         return empty_template
 
     candidates: list[dict[str, object]] = []
-    for (alg, rep), group in df.groupby(["algorithm", "repetition"]):
+    for (data_type, alg, rep), group in df.groupby(["data_type", "algorithm", "repetition"]):
         sizes_present = set(group["dataset_size"])
         if not required_sizes.issubset(sizes_present):
             continue
         gmean_time = geometric_mean(group["mean_time_s"])
         if not np.isfinite(gmean_time):
             continue
-        candidates.append({"algorithm": alg, "repetition": rep, "geom_time": gmean_time})
+        candidates.append(
+            {
+                "data_type": data_type,
+                "algorithm": alg,
+                "repetition": rep,
+                "geom_time": gmean_time,
+            }
+        )
 
     if not candidates:
         return empty_template.copy()
 
     candidate_df = pd.DataFrame.from_records(candidates)
     best_reps = (
-        candidate_df.sort_values(["algorithm", "geom_time", "repetition"])
-        .groupby("algorithm", as_index=False)
+        candidate_df.sort_values(["data_type", "algorithm", "geom_time", "repetition"])
+        .groupby(["data_type", "algorithm"], as_index=False)
         .first()
-    )[["algorithm", "repetition"]]
+    )[["data_type", "algorithm", "repetition"]]
 
-    chosen = df.merge(best_reps, on=["algorithm", "repetition"], how="inner")
+    chosen = df.merge(best_reps, on=["data_type", "algorithm", "repetition"], how="inner")
     chosen = chosen[chosen["dataset_size"].isin(required_sizes)].copy()
 
     chosen["baseline_time_s"] = chosen["mean_time_s"]
@@ -225,6 +297,7 @@ def select_best_standard_baseline(
     chosen["baseline_repetition"] = chosen["repetition"]
     return chosen[
         [
+            "data_type",
             "algorithm",
             "dataset_size",
             "baseline_time_s",
@@ -241,6 +314,7 @@ def merge_baseline_tables(primary: pd.DataFrame, fallback: pd.DataFrame | None) 
     if primary is None:
         primary = pd.DataFrame(
             columns=[
+                "data_type",
                 "algorithm",
                 "dataset_size",
                 "baseline_time_s",
@@ -252,8 +326,9 @@ def merge_baseline_tables(primary: pd.DataFrame, fallback: pd.DataFrame | None) 
     if fallback is None or fallback.empty:
         return primary.copy()
 
-    primary_algs = set(primary["algorithm"])
-    missing = fallback[~fallback["algorithm"].isin(primary_algs)]
+    primary_keys = set(primary[["data_type", "algorithm"]].itertuples(index=False, name=None))
+    fallback_keys = fallback[["data_type", "algorithm"]].apply(tuple, axis=1)
+    missing = fallback[~fallback_keys.isin(primary_keys)]
     return pd.concat([primary, missing], ignore_index=True)
 
 
@@ -273,6 +348,7 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
             df["dataset_size"] = df["dataset_size"].fillna(inferred_size)
             if inferred_size is not None:
                 df.loc[df["dataset_size"] == "", "dataset_size"] = inferred_size
+        df = normalize_data_type_column(df)
 
         required = {"framework", "algorithm", "repetition", "time_s"}
         missing = required - set(df.columns)
@@ -282,7 +358,15 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
         if "version" not in df.columns:
             df["version"] = ""
 
-        cols_to_keep = ["framework", "version", "algorithm", "repetition", "dataset_size", "time_s"]
+        cols_to_keep = [
+            "framework",
+            "version",
+            "algorithm",
+            "repetition",
+            "dataset_size",
+            "data_type",
+            "time_s",
+        ]
         if "run" in df.columns:
             cols_to_keep.append("run")
 
@@ -292,6 +376,7 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
         trimmed["version"] = trimmed["version"].astype(str).str.strip()
         trimmed["algorithm"] = trimmed["algorithm"].astype(str).str.strip()
         trimmed["dataset_size"] = trimmed["dataset_size"].astype(str).str.strip()
+        trimmed["data_type"] = trimmed["data_type"].apply(normalize_data_type_value)
         trimmed["repetition"] = pd.to_numeric(trimmed["repetition"], errors="coerce")
         trimmed["time_s"] = pd.to_numeric(trimmed["time_s"], errors="coerce")
 
@@ -315,6 +400,7 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
                 "algorithm",
                 "repetition",
                 "dataset_size",
+                "data_type",
                 "mean_time_s",
             ]
         )
@@ -322,7 +408,7 @@ def load_and_aggregate_times(paths: Iterable[Path], warmup: int = 0) -> pd.DataF
     combined = pd.concat(frames, ignore_index=True)
     grouped = (
         combined.groupby(
-            ["framework", "version", "algorithm", "repetition", "dataset_size"],
+            result_key_columns(combined),
             as_index=False,
         )["time_s"]
         .mean()
@@ -347,6 +433,7 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
             df["dataset_size"] = df["dataset_size"].fillna(inferred_size)
             if inferred_size is not None:
                 df.loc[df["dataset_size"] == "", "dataset_size"] = inferred_size
+        df = normalize_data_type_column(df)
 
         status_column = get_validation_status_column(df)
         required = {"framework", "algorithm", "repetition"}
@@ -359,7 +446,15 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
         if "version" not in df.columns:
             df["version"] = np.nan
 
-        keep_cols = ["framework", "version", "algorithm", "repetition", "dataset_size", status_column]
+        keep_cols = [
+            "framework",
+            "version",
+            "algorithm",
+            "repetition",
+            "dataset_size",
+            "data_type",
+            status_column,
+        ]
         has_time_column = "time_s" in df.columns
         if has_time_column:
             keep_cols.append("time_s")
@@ -371,6 +466,7 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
         )
         trimmed["algorithm"] = trimmed["algorithm"].astype(str).str.strip()
         trimmed["dataset_size"] = trimmed["dataset_size"].astype(str).str.strip()
+        trimmed["data_type"] = trimmed["data_type"].apply(normalize_data_type_value)
         trimmed["repetition"] = pd.to_numeric(trimmed["repetition"], errors="coerce")
 
         trimmed["status"] = normalize_status_column(trimmed[status_column])
@@ -403,6 +499,7 @@ def load_and_aggregate_validation(paths: Iterable[Path]) -> pd.DataFrame | None:
     key_cols = [
         col
         for col in ["framework", "version", "algorithm", "repetition", "dataset_size"]
+        + SETTING_COLUMNS
         if col in combined.columns
     ]
     grouped = (
@@ -429,7 +526,7 @@ def apply_validation_filter(
 
     join_keys = [
         col
-        for col in ["framework", "version", "algorithm", "repetition", "dataset_size"]
+        for col in result_key_columns(times)
         if col in validation.columns
     ]
     if not join_keys:
@@ -571,12 +668,12 @@ def derive_expected_dataset_sizes(translation_times: pd.DataFrame) -> set[str]:
     return set(translation_times["dataset_size"].unique())
 
 
-def translation_repetitions_by_algorithm(translation_times: pd.DataFrame) -> dict[str, set[int]]:
-    """Map each algorithm to repetitions seen in translation runs."""
+def translation_repetitions_by_algorithm(translation_times: pd.DataFrame) -> dict[tuple[str, str], set[int]]:
+    """Map each (data_type, algorithm) to repetitions seen in translation runs."""
 
-    reps: dict[str, set[int]] = {}
-    for alg, group in translation_times.groupby("algorithm"):
-        reps[alg] = set(group["repetition"].unique())
+    reps: dict[tuple[str, str], set[int]] = {}
+    for (data_type, alg), group in translation_times.groupby(["data_type", "algorithm"]):
+        reps[(data_type, alg)] = set(group["repetition"].unique())
     return reps
 
 
@@ -607,30 +704,29 @@ def classify_repetition_outcomes(
         validation_norm = None
 
     expected_sizes_map: dict[tuple[str, str, str], set[str]] = {}
+    classification_identity = ["data_type", "framework", "version", "algorithm"]
     for df_src in [times_norm, validation_norm] if validation_norm is not None else [times_norm]:
-        for (fw, ver, alg), group in df_src.groupby(["framework", "version", "algorithm"], dropna=False):
-            key = (fw, ver, alg)
+        for key, group in df_src.groupby(classification_identity, dropna=False):
             expected_sizes_map.setdefault(key, set()).update(group["dataset_size"].astype(str))
 
-    group_keys: set[tuple[str, str, str]] = set()
+    group_keys: set[tuple[str, str, str, str]] = set()
     if not times_norm.empty:
         group_keys.update(
-            (fw, ver, alg)
-            for fw, ver, alg in times_norm[["framework", "version", "algorithm"]].itertuples(index=False, name=None)
+            tuple(row)
+            for row in times_norm[classification_identity].itertuples(index=False, name=None)
         )
     if validation_norm is not None and not validation_norm.empty:
         group_keys.update(
-            (fw, ver, alg)
-            for fw, ver, alg in validation_norm[["framework", "version", "algorithm"]].itertuples(
-                index=False, name=None
-            )
+            tuple(row)
+            for row in validation_norm[classification_identity].itertuples(index=False, name=None)
         )
 
     records: list[dict[str, object]] = []
-    for fw, ver, alg in sorted(group_keys):
+    for data_type, fw, ver, alg in sorted(group_keys):
         reps_from_times = set(
             times_norm[
-                (times_norm["framework"] == fw)
+                (times_norm["data_type"] == data_type)
+                & (times_norm["framework"] == fw)
                 & (times_norm["version"] == ver)
                 & (times_norm["algorithm"] == alg)
             ]["repetition"].unique()
@@ -639,7 +735,8 @@ def classify_repetition_outcomes(
         if validation_norm is not None:
             reps_from_validation = set(
                 validation_norm[
-                    (validation_norm["framework"] == fw)
+                    (validation_norm["data_type"] == data_type)
+                    & (validation_norm["framework"] == fw)
                     & (validation_norm["version"] == ver)
                     & (validation_norm["algorithm"] == alg)
                 ]["repetition"].unique()
@@ -648,14 +745,15 @@ def classify_repetition_outcomes(
         rep_candidates: set[int] = set()
         rep_candidates.update(reps_from_times)
         rep_candidates.update(reps_from_validation)
-        rep_candidates.update(translation_reps.get(alg, set()))
+        rep_candidates.update(translation_reps.get((data_type, alg), set()))
         if not rep_candidates:
             continue
         for rep in sorted(rep_candidates):
             val_rows = pd.DataFrame()
             if validation_norm is not None:
                 val_rows = validation_norm[
-                    (validation_norm["framework"] == fw)
+                    (validation_norm["data_type"] == data_type)
+                    & (validation_norm["framework"] == fw)
                     & (validation_norm["version"] == ver)
                     & (validation_norm["algorithm"] == alg)
                     & (validation_norm["repetition"] == rep)
@@ -673,7 +771,8 @@ def classify_repetition_outcomes(
                     has_validation_time = bool(val_rows["time_s"].notna().any())
 
             time_rows = times_norm[
-                (times_norm["framework"] == fw)
+                (times_norm["data_type"] == data_type)
+                & (times_norm["framework"] == fw)
                 & (times_norm["version"] == ver)
                 & (times_norm["algorithm"] == alg)
                 & (times_norm["repetition"] == rep)
@@ -685,6 +784,7 @@ def classify_repetition_outcomes(
                 category = classify_invalid_statuses(validation_statuses, has_any_time)
                 records.append(
                     {
+                        "data_type": data_type,
                         "framework": fw,
                         "version": ver,
                         "algorithm": alg,
@@ -698,6 +798,7 @@ def classify_repetition_outcomes(
                 category = "invalid_code"
                 records.append(
                     {
+                        "data_type": data_type,
                         "framework": fw,
                         "version": ver,
                         "algorithm": alg,
@@ -708,14 +809,15 @@ def classify_repetition_outcomes(
                 continue
 
             present_sizes = set(time_rows["dataset_size"].astype(str).unique())
-            expected_sizes = expected_sizes_map.get((fw, ver, alg), present_sizes)
+            expected_sizes = expected_sizes_map.get((data_type, fw, ver, alg), present_sizes)
             missing_sizes = expected_sizes - present_sizes
 
             if missing_sizes:
                 category = "invalid_algorithm"
             else:
                 rep_speedups = speedups[
-                    (speedups["framework"] == fw)
+                    (speedups["data_type"] == data_type)
+                    & (speedups["framework"] == fw)
                     & (speedups["version"] == ver)
                     & (speedups["algorithm"] == alg)
                     & (speedups["repetition"] == rep)
@@ -732,6 +834,7 @@ def classify_repetition_outcomes(
 
             records.append(
                 {
+                    "data_type": data_type,
                     "framework": fw,
                     "version": ver,
                     "algorithm": alg,
@@ -742,7 +845,7 @@ def classify_repetition_outcomes(
 
     return pd.DataFrame.from_records(
         records,
-        columns=["framework", "version", "algorithm", "repetition", "category"],
+        columns=["data_type", "framework", "version", "algorithm", "repetition", "category"],
     )
 
 
@@ -878,6 +981,8 @@ def compute_speedups(
         baseline_df["baseline_time_s"] = baseline_df["mean_time_s"]
         baseline_df["baseline_framework"] = BASELINE_FRAMEWORK
 
+    baseline_df = normalize_data_type_column(baseline_df)
+    optimization_times = normalize_data_type_column(optimization_times)
     baseline_df["dataset_size"] = baseline_df["dataset_size"].astype(str)
     optimization_times = optimization_times.copy()
     optimization_times["dataset_size"] = optimization_times["dataset_size"].astype(str)
@@ -893,7 +998,7 @@ def compute_speedups(
             continue
 
         baseline_by_algo = (
-            base_df.groupby(["algorithm", "dataset_size"], as_index=False).agg(
+            base_df.groupby(["data_type", "algorithm", "dataset_size"], as_index=False).agg(
                 baseline_time_s=("baseline_time_s", "mean"),
                 baseline_framework=("baseline_framework", "first"),
             )
@@ -903,7 +1008,7 @@ def compute_speedups(
             columns={"mean_time_s": "optimized_time_s"}
         )
         merged = opt_df.merge(
-            baseline_by_algo, on=["algorithm", "dataset_size"], how="inner"
+            baseline_by_algo, on=["data_type", "algorithm", "dataset_size"], how="inner"
         )
         merged["speedup"] = merged["baseline_time_s"] / merged["optimized_time_s"]
         merged = merged[np.isfinite(merged["speedup"]) & (merged["speedup"] > 0)]
@@ -915,6 +1020,7 @@ def compute_speedups(
                 "framework",
                 "version",
                 "algorithm",
+                "data_type",
                 "repetition",
                 "dataset_size",
                 "speedup",
@@ -929,6 +1035,7 @@ def compute_speedups(
         "framework",
         "version",
         "algorithm",
+        "data_type",
         "repetition",
         "dataset_size",
         "speedup",
@@ -1304,16 +1411,23 @@ def build_heatmap_table(
     base = base_df.copy()
     base["version_norm"] = base["version"].apply(normalize_version_value)
     base["framework"] = base["framework"].apply(normalize_framework_value)
+    base = normalize_data_type_column(base)
+    include_data_type_label = base["data_type"].nunique(dropna=False) > 1
     if not include_standard:
         base = base[base["version_norm"] != "standard"].copy()
     if base.empty:
         return pd.DataFrame(), [], [], [], []
 
     if best in ("pick", "none"):
-        base = best_per_group(base, ["framework", "version", "algorithm"])
+        base = best_per_group(base, ["data_type", "framework", "version", "algorithm"])
 
     base["row_label"] = base.apply(
-        lambda r: f"{r['framework']}: {format_version_label(r['version'])}", axis=1
+        lambda r: (
+            f"{r['data_type']} | {r['framework']}: {format_version_label(r['version'])}"
+            if include_data_type_label
+            else f"{r['framework']}: {format_version_label(r['version'])}"
+        ),
+        axis=1,
     )
     row_labels = list(dict.fromkeys(base["row_label"]))
     row_label_to_fw = (
@@ -1385,6 +1499,8 @@ def build_correctness_heatmap_table(
     base = outcomes.copy()
     base["version_norm"] = base["version"].apply(normalize_version_value)
     base["framework"] = base["framework"].apply(normalize_framework_value)
+    base = normalize_data_type_column(base)
+    include_data_type_label = base["data_type"].nunique(dropna=False) > 1
     if not include_standard:
         base = base[base["version_norm"] != "standard"].copy()
     if base.empty:
@@ -1392,7 +1508,7 @@ def build_correctness_heatmap_table(
 
     base["is_valid"] = ~base["category"].isin(["invalid_code", "invalid_algorithm"])
     grouped = (
-        base.groupby(["framework", "version", "algorithm"], dropna=False)
+        base.groupby(["data_type", "framework", "version", "algorithm"], dropna=False)
         .agg(valid_reps=("is_valid", "sum"), total_reps=("is_valid", "size"))
         .reset_index()
     )
@@ -1402,7 +1518,12 @@ def build_correctness_heatmap_table(
     )
 
     grouped["row_label"] = grouped.apply(
-        lambda r: f"{r['framework']}: {format_version_label(r['version'])}", axis=1
+        lambda r: (
+            f"{r['data_type']} | {r['framework']}: {format_version_label(r['version'])}"
+            if include_data_type_label
+            else f"{r['framework']}: {format_version_label(r['version'])}"
+        ),
+        axis=1,
     )
     row_labels = list(dict.fromkeys(grouped["row_label"]))
     row_label_to_fw = (
@@ -1564,17 +1685,17 @@ def best_speedups_per_dataset_size(
 
     if speedups.empty:
         return pd.DataFrame(
-            columns=["framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
+            columns=["data_type", "framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
         )
 
     candidates = speedups[
-        ["framework", "version", "algorithm", "dataset_size", "speedup"]
+        ["data_type", "framework", "version", "algorithm", "dataset_size", "speedup"]
     ].rename(columns={"speedup": "best_speedup"})
     candidates["dataset_size"] = candidates["dataset_size"].astype(str)
     frames = [candidates]
     if include_baseline:
         baseline = (
-            candidates[["framework", "version", "algorithm", "dataset_size"]]
+            candidates[["data_type", "framework", "version", "algorithm", "dataset_size"]]
             .drop_duplicates()
             .copy()
         )
@@ -1583,7 +1704,7 @@ def best_speedups_per_dataset_size(
 
     best_per_size = (
         pd.concat(frames, ignore_index=True)
-        .groupby(["framework", "version", "algorithm", "dataset_size"], as_index=False)[
+        .groupby(["data_type", "framework", "version", "algorithm", "dataset_size"], as_index=False)[
             "best_speedup"
         ]
         .max()
@@ -1591,7 +1712,7 @@ def best_speedups_per_dataset_size(
     best_per_size = best_per_size.rename(columns={"best_speedup": "geom_speedup"})
     best_per_size["repetition"] = label
     return best_per_size[
-        ["framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
+        ["data_type", "framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
     ]
 
 
@@ -1602,12 +1723,12 @@ def compute_geom_by_dataset_size(
 
     if speedups.empty:
         return pd.DataFrame(
-            columns=["framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
+            columns=["data_type", "framework", "version", "algorithm", "dataset_size", "repetition", "geom_speedup"]
         )
 
     base = (
         speedups.groupby(
-            ["framework", "version", "algorithm", "repetition", "dataset_size"], as_index=False
+            ["data_type", "framework", "version", "algorithm", "repetition", "dataset_size"], as_index=False
         )
         .agg(geom_speedup=("speedup", geometric_mean))
         .dropna(subset=["geom_speedup"])
@@ -1617,7 +1738,7 @@ def compute_geom_by_dataset_size(
     if best == "none":
         return base
     if best == "pick":
-        return best_per_group(base, ["framework", "version", "algorithm", "dataset_size"])
+        return best_per_group(base, ["data_type", "framework", "version", "algorithm", "dataset_size"])
     if best in ("combine", "smart-combine"):
         label = "smart-combine" if include_baseline else "combined"
         return best_speedups_per_dataset_size(speedups, include_baseline=include_baseline, label=label)
@@ -1663,6 +1784,7 @@ def geom_mean_of_best_speedups(
     if speedups.empty:
         return pd.DataFrame(
             columns=[
+                "data_type",
                 "framework",
                 "version",
                 "algorithm",
@@ -1673,12 +1795,12 @@ def geom_mean_of_best_speedups(
         )
 
     candidates = speedups[
-        ["framework", "version", "algorithm", "dataset_size", "speedup"]
+        ["data_type", "framework", "version", "algorithm", "dataset_size", "speedup"]
     ].rename(columns={"speedup": "best_speedup"})
     frames = [candidates]
     if include_baseline:
         baseline = (
-            candidates[["framework", "version", "algorithm", "dataset_size"]]
+            candidates[["data_type", "framework", "version", "algorithm", "dataset_size"]]
             .drop_duplicates()
             .copy()
         )
@@ -1687,20 +1809,20 @@ def geom_mean_of_best_speedups(
 
     best_per_size = (
         pd.concat(frames, ignore_index=True)
-        .groupby(["framework", "version", "algorithm", "dataset_size"], as_index=False)[
+        .groupby(["data_type", "framework", "version", "algorithm", "dataset_size"], as_index=False)[
             "best_speedup"
         ]
         .max()
     )
     combined = best_per_size.groupby(
-        ["framework", "version", "algorithm"], as_index=False
+        ["data_type", "framework", "version", "algorithm"], as_index=False
     ).agg(
         geom_speedup=("best_speedup", geometric_mean),
         dataset_sizes=("dataset_size", "nunique"),
     )
     combined["repetition"] = label
     return combined[
-        ["framework", "version", "algorithm", "repetition", "geom_speedup", "dataset_sizes"]
+        ["data_type", "framework", "version", "algorithm", "repetition", "geom_speedup", "dataset_sizes"]
     ]
 
 
@@ -1727,7 +1849,9 @@ def append_label_suffix(base: str, label_suffix: str | None) -> str:
     return f"{base}_{cleaned}" if cleaned else base
 
 
-def build_label_suffix(*, baseline: str, dataset_sizes: Sequence[str]) -> str:
+def build_label_suffix(
+    *, baseline: str, dataset_sizes: Sequence[str], data_types: Sequence[str]
+) -> str:
     """Construct a suffix describing explicit baseline/dataset selections."""
 
     parts: list[str] = []
@@ -1736,6 +1860,9 @@ def build_label_suffix(*, baseline: str, dataset_sizes: Sequence[str]) -> str:
     if dataset_sizes:
         joined_sizes = "-".join(str(size) for size in dataset_sizes)
         parts.append(f"datasets-{joined_sizes}")
+    if data_types:
+        joined_data_types = "-".join(str(data_type) for data_type in data_types)
+        parts.append(f"data_types-{joined_data_types}")
     return "__".join(parts)
 
 
@@ -1758,13 +1885,23 @@ def plot_per_framework_version(
 ):
     """Plot geom. means grouped by (framework, version)."""
 
-    for (framework, version), subset in geom_df.groupby(
-        ["framework", "version"], dropna=False
-    ):
+    group_cols = ["data_type", "framework", "version"] if "data_type" in geom_df.columns else ["framework", "version"]
+    for group_key, subset in geom_df.groupby(group_cols, dropna=False):
+        if "data_type" in geom_df.columns:
+            data_type, framework, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework, version = group_key
+            type_prefix = ""
         if best in ("combine", "smart-combine"):
             data = combined_geom_df[
                 (combined_geom_df["framework"] == framework)
                 & (combined_geom_df["version"] == version)
+                & (
+                    (combined_geom_df["data_type"] == data_type)
+                    if "data_type" in combined_geom_df.columns and "data_type" in geom_df.columns
+                    else True
+                )
             ].copy()
         else:
             data = subset.copy()
@@ -1774,7 +1911,7 @@ def plot_per_framework_version(
             continue
 
         version_label = format_version_label(version)
-        stem = f"fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}"
+        stem = f"{type_prefix}fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
@@ -1811,9 +1948,23 @@ def plot_per_version_across_frameworks(
 ):
     """Plot geom. means grouped by version across frameworks."""
 
-    for version, subset in geom_df.groupby("version", dropna=False):
+    group_cols = ["data_type", "version"] if "data_type" in geom_df.columns else ["version"]
+    for group_key, subset in geom_df.groupby(group_cols, dropna=False):
+        if "data_type" in geom_df.columns:
+            data_type, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            version = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
         if best in ("combine", "smart-combine"):
-            data = combined_geom_df[combined_geom_df["version"] == version].copy()
+            data = combined_geom_df[
+                (combined_geom_df["version"] == version)
+                & (
+                    (combined_geom_df["data_type"] == data_type)
+                    if "data_type" in combined_geom_df.columns and "data_type" in geom_df.columns
+                    else True
+                )
+            ].copy()
         else:
             data = subset.copy()
             if best == "pick":
@@ -1822,7 +1973,7 @@ def plot_per_version_across_frameworks(
             continue
 
         version_label = format_version_label(version)
-        stem = f"version-{version_label}_{plot_kind}{best_suffix(best)}"
+        stem = f"{type_prefix}version-{version_label}_{plot_kind}{best_suffix(best)}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
@@ -1859,9 +2010,23 @@ def plot_per_framework_across_versions(
 ):
     """Plot geom. means grouped by framework, coloring by version."""
 
-    for framework, subset in geom_df.groupby("framework", dropna=False):
+    group_cols = ["data_type", "framework"] if "data_type" in geom_df.columns else ["framework"]
+    for group_key, subset in geom_df.groupby(group_cols, dropna=False):
+        if "data_type" in geom_df.columns:
+            data_type, framework = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
         if best in ("combine", "smart-combine"):
-            data = combined_geom_df[combined_geom_df["framework"] == framework].copy()
+            data = combined_geom_df[
+                (combined_geom_df["framework"] == framework)
+                & (
+                    (combined_geom_df["data_type"] == data_type)
+                    if "data_type" in combined_geom_df.columns and "data_type" in geom_df.columns
+                    else True
+                )
+            ].copy()
         else:
             data = subset.copy()
             data["version_label"] = data["version"].apply(format_version_label)
@@ -1872,7 +2037,7 @@ def plot_per_framework_across_versions(
 
         if best in ("combine", "smart-combine"):
             data["version_label"] = data["version"].apply(format_version_label)
-        stem = f"framework-{framework}_versions_{plot_kind}{best_suffix(best)}"
+        stem = f"{type_prefix}framework-{framework}_versions_{plot_kind}{best_suffix(best)}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_algorithms(
             data,
@@ -1904,19 +2069,25 @@ def plot_per_framework_version_agg_algorithms(
 ) -> None:
     """Plot geom. means aggregated over algorithms per dataset size for each (framework, version)."""
 
-    for (framework, version), subset in per_size_df.groupby(
-        ["framework", "version"], dropna=False
-    ):
+    group_cols = ["data_type", "framework", "version"] if "data_type" in per_size_df.columns else ["framework", "version"]
+    for group_key, subset in per_size_df.groupby(group_cols, dropna=False):
+        if "data_type" in per_size_df.columns:
+            data_type, framework, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework, version = group_key
+            type_prefix = ""
         if subset.empty:
             continue
 
-        aggregated = aggregate_over_algorithms_by_size(subset, ["framework", "version"])
+        aggregate_cols = ["data_type", "framework", "version"] if "data_type" in subset.columns else ["framework", "version"]
+        aggregated = aggregate_over_algorithms_by_size(subset, aggregate_cols)
         if aggregated.empty:
             continue
 
         aggregated["version_label"] = aggregated["version"].apply(format_version_label)
         version_label = aggregated["version_label"].iloc[0]
-        stem = f"fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}_agg-alg"
+        stem = f"{type_prefix}fw-{framework}_ver-{version_label}_{plot_kind}{best_suffix(best)}_agg-alg"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
@@ -1944,17 +2115,25 @@ def plot_per_version_across_frameworks_agg_algorithms(
 ) -> None:
     """Plot geom. means aggregated over algorithms grouped by version across frameworks."""
 
-    for version, subset in per_size_df.groupby("version", dropna=False):
+    group_cols = ["data_type", "version"] if "data_type" in per_size_df.columns else ["version"]
+    for group_key, subset in per_size_df.groupby(group_cols, dropna=False):
+        if "data_type" in per_size_df.columns:
+            data_type, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            version = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
         if subset.empty:
             continue
 
-        aggregated = aggregate_over_algorithms_by_size(subset, ["version"])
+        aggregate_cols = ["data_type", "version"] if "data_type" in subset.columns else ["version"]
+        aggregated = aggregate_over_algorithms_by_size(subset, aggregate_cols)
         if aggregated.empty:
             continue
 
         aggregated["version_label"] = aggregated["version"].apply(format_version_label)
         version_label = format_version_label(version)
-        stem = f"version-{version_label}_frameworks_{plot_kind}{best_suffix(best)}_agg-alg"
+        stem = f"{type_prefix}version-{version_label}_frameworks_{plot_kind}{best_suffix(best)}_agg-alg"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
@@ -1982,17 +2161,29 @@ def plot_per_framework_across_versions_agg_algorithms(
 ) -> None:
     """Plot geom. means aggregated over algorithms grouped by framework across versions."""
 
-    for framework, subset in per_size_df.groupby("framework", dropna=False):
+    group_cols = ["data_type", "framework"] if "data_type" in per_size_df.columns else ["framework"]
+    for group_key, subset in per_size_df.groupby(group_cols, dropna=False):
+        if "data_type" in per_size_df.columns:
+            data_type, framework = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
         if subset.empty:
             continue
 
         data = subset.copy()
         data["version_label"] = data["version"].apply(format_version_label)
-        aggregated = aggregate_over_algorithms_by_size(data, ["framework", "version", "version_label"])
+        aggregate_cols = (
+            ["data_type", "framework", "version", "version_label"]
+            if "data_type" in data.columns
+            else ["framework", "version", "version_label"]
+        )
+        aggregated = aggregate_over_algorithms_by_size(data, aggregate_cols)
         if aggregated.empty:
             continue
 
-        stem = f"framework-{framework}_versions_{plot_kind}{best_suffix(best)}_agg-alg"
+        stem = f"{type_prefix}framework-{framework}_versions_{plot_kind}{best_suffix(best)}_agg-alg"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         plot_dataset_size_aggregates(
             aggregated,
@@ -2021,14 +2212,27 @@ def plot_shares_per_framework_version(
 ):
     """Plot outcome shares grouped by (framework, version)."""
 
-    for (framework, version), subset in shares_df.groupby(["framework", "version"], dropna=False):
+    group_cols = ["data_type", "framework", "version"] if "data_type" in shares_df.columns else ["framework", "version"]
+    for group_key, subset in shares_df.groupby(group_cols, dropna=False):
         if subset.empty:
             continue
+        if "data_type" in shares_df.columns:
+            data_type, framework, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework, version = group_key
+            type_prefix = ""
         version_label = format_version_label(version)
-        stem = f"fw-{framework}_ver-{version_label}_shares_thr-{threshold:.2f}"
+        stem = f"{type_prefix}fw-{framework}_ver-{version_label}_shares_thr-{threshold:.2f}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
         order_source = geom_df[
-            (geom_df["framework"] == framework) & (geom_df["version"] == version)
+            (geom_df["framework"] == framework)
+            & (geom_df["version"] == version)
+            & (
+                (geom_df["data_type"] == data_type)
+                if "data_type" in geom_df.columns and "data_type" in shares_df.columns
+                else True
+            )
         ]
         plot_category_shares(
             subset,
@@ -2056,13 +2260,27 @@ def plot_shares_per_version(
 ):
     """Plot outcome shares grouped by version across frameworks."""
 
-    for version, subset in shares_df.groupby("version", dropna=False):
+    group_cols = ["data_type", "version"] if "data_type" in shares_df.columns else ["version"]
+    for group_key, subset in shares_df.groupby(group_cols, dropna=False):
         if subset.empty:
             continue
+        if "data_type" in shares_df.columns:
+            data_type, version = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            version = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
         version_label = format_version_label(version)
-        stem = f"version-{version_label}_shares_thr-{threshold:.2f}"
+        stem = f"{type_prefix}version-{version_label}_shares_thr-{threshold:.2f}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
-        order_source = geom_df[geom_df["version"] == version]
+        order_source = geom_df[
+            (geom_df["version"] == version)
+            & (
+                (geom_df["data_type"] == data_type)
+                if "data_type" in geom_df.columns and "data_type" in shares_df.columns
+                else True
+            )
+        ]
         plot_category_shares(
             subset,
             out_path=out_dir / file_name,
@@ -2089,12 +2307,26 @@ def plot_shares_per_framework(
 ):
     """Plot outcome shares grouped by framework across versions."""
 
-    for framework, subset in shares_df.groupby("framework", dropna=False):
+    group_cols = ["data_type", "framework"] if "data_type" in shares_df.columns else ["framework"]
+    for group_key, subset in shares_df.groupby(group_cols, dropna=False):
         if subset.empty:
             continue
-        stem = f"framework-{framework}_shares_thr-{threshold:.2f}"
+        if "data_type" in shares_df.columns:
+            data_type, framework = group_key
+            type_prefix = f"datatype-{data_type}_"
+        else:
+            framework = group_key[0] if isinstance(group_key, tuple) else group_key
+            type_prefix = ""
+        stem = f"{type_prefix}framework-{framework}_shares_thr-{threshold:.2f}"
         file_name = f"{append_label_suffix(stem, label_suffix)}.{plot_format}"
-        order_source = geom_df[geom_df["framework"] == framework]
+        order_source = geom_df[
+            (geom_df["framework"] == framework)
+            & (
+                (geom_df["data_type"] == data_type)
+                if "data_type" in geom_df.columns and "data_type" in shares_df.columns
+                else True
+            )
+        ]
         plot_category_shares(
             subset,
             out_path=out_dir / file_name,
@@ -2192,7 +2424,7 @@ def append_standard_version(
 
     combined = pd.concat([optimization_times, standard_runs], ignore_index=True)
     return combined.drop_duplicates(
-        subset=["framework", "version", "algorithm", "repetition", "dataset_size"],
+        subset=result_key_columns(combined),
         keep="first",
     )
 
@@ -2253,6 +2485,15 @@ def main() -> None:
         help=(
             "Restrict processing to specific dataset sizes (e.g., SMALL). "
             "Can be repeated or comma-separated to select multiple sizes."
+        ),
+    )
+    parser.add_argument(
+        "--data-type",
+        dest="data_types",
+        action="append",
+        help=(
+            "Restrict processing to specific datatypes (e.g., FLOAT). "
+            "Can be repeated or comma-separated to select multiple values."
         ),
     )
     parser.add_argument(
@@ -2346,6 +2587,7 @@ def main() -> None:
         args.best = "pick"
 
     dataset_size_filter = normalize_cli_args(args.dataset_sizes)
+    data_type_filter = normalize_cli_args(args.data_types)
     framework_filter = normalize_cli_args(args.no_framework)
     algorithm_filter = [] if args.include_tuning_benchmarks else list(TUNING_BENCHMARKS)
 
@@ -2397,6 +2639,13 @@ def main() -> None:
         optimization_times = filter_algorithms(optimization_times, algorithm_filter)
         translation_validation = filter_algorithms(translation_validation, algorithm_filter)
         optimization_validation = filter_algorithms(optimization_validation, algorithm_filter)
+
+    if data_type_filter:
+        print(f"Filtering to data types: {', '.join(data_type_filter)}")
+        translation_times = filter_data_types(translation_times, data_type_filter)
+        optimization_times = filter_data_types(optimization_times, data_type_filter)
+        translation_validation = filter_data_types(translation_validation, data_type_filter)
+        optimization_validation = filter_data_types(optimization_validation, data_type_filter)
 
     # Keep full copies for classification to ensure validity checks consider all dataset sizes
     translation_times_full = translation_times.copy()
@@ -2455,6 +2704,7 @@ def main() -> None:
         if args.baseline != BASELINE_FRAMEWORK
         else pd.DataFrame(
             columns=[
+                "data_type",
                 "algorithm",
                 "dataset_size",
                 "baseline_time_s",
@@ -2478,11 +2728,12 @@ def main() -> None:
     label_suffix = build_label_suffix(
         baseline=args.baseline,
         dataset_sizes=dataset_size_filter,
+        data_types=data_type_filter,
     )
     csv_stem = append_label_suffix("speedups", label_suffix)
     csv_path = out_dir / f"{csv_stem}.csv"
     speedups.sort_values(
-        ["dataset_size", "algorithm", "framework", "version", "repetition"]
+        ["data_type", "dataset_size", "algorithm", "framework", "version", "repetition"]
     ).to_csv(csv_path, index=False)
     print(f"Wrote speedup table to {csv_path}")
 
@@ -2496,24 +2747,24 @@ def main() -> None:
 
     # Filter outcomes to only include repetitions present in the requested dataset sizes
     if dataset_size_filter:
-        relevant_groups = optimization_times[["framework", "version", "algorithm"]].drop_duplicates()
+        relevant_groups = optimization_times[["data_type", "framework", "version", "algorithm"]].drop_duplicates()
         if optimization_validation is not None:
-            val_groups = optimization_validation[["framework", "version", "algorithm"]].drop_duplicates()
+            val_groups = optimization_validation[["data_type", "framework", "version", "algorithm"]].drop_duplicates()
             relevant_groups = pd.concat([relevant_groups, val_groups], ignore_index=True).drop_duplicates()
 
-        outcomes = outcomes.merge(relevant_groups, on=["framework", "version", "algorithm"], how="inner")
+        outcomes = outcomes.merge(relevant_groups, on=["data_type", "framework", "version", "algorithm"], how="inner")
 
     outcomes_stem = append_label_suffix(
         f"outcomes_thr-{args.speedup_threshold:.2f}", label_suffix
     )
     outcomes_csv = out_dir / f"{outcomes_stem}.csv"
-    outcomes.sort_values(["framework", "version", "algorithm", "repetition"]).to_csv(outcomes_csv, index=False)
+    outcomes.sort_values(["data_type", "framework", "version", "algorithm", "repetition"]).to_csv(outcomes_csv, index=False)
     print(f"Wrote outcome categories to {outcomes_csv}")
 
     outcomes_for_shares = outcomes[outcomes["version"].apply(normalize_version_value) != "standard"].copy()
-    shares_fw_ver = compute_category_shares(outcomes_for_shares, ["framework", "version"])
-    shares_ver = compute_category_shares(outcomes_for_shares, ["version"])
-    shares_fw = compute_category_shares(outcomes_for_shares, ["framework"])
+    shares_fw_ver = compute_category_shares(outcomes_for_shares, ["data_type", "framework", "version"])
+    shares_ver = compute_category_shares(outcomes_for_shares, ["data_type", "version"])
+    shares_fw = compute_category_shares(outcomes_for_shares, ["data_type", "framework"])
     shares_fw_ver_stem = append_label_suffix(
         f"shares_fw_ver_thr-{args.speedup_threshold:.2f}", label_suffix
     )
@@ -2526,29 +2777,29 @@ def main() -> None:
     shares_fw_ver_csv = out_dir / f"{shares_fw_ver_stem}.csv"
     shares_ver_csv = out_dir / f"{shares_ver_stem}.csv"
     shares_fw_csv = out_dir / f"{shares_fw_stem}.csv"
-    shares_fw_ver.sort_values(["framework", "version", "algorithm", "category"]).to_csv(
+    shares_fw_ver.sort_values(["data_type", "framework", "version", "algorithm", "category"]).to_csv(
         shares_fw_ver_csv, index=False
     )
-    shares_ver.sort_values(["version", "algorithm", "category"]).to_csv(shares_ver_csv, index=False)
-    shares_fw.sort_values(["framework", "algorithm", "category"]).to_csv(shares_fw_csv, index=False)
+    shares_ver.sort_values(["data_type", "version", "algorithm", "category"]).to_csv(shares_ver_csv, index=False)
+    shares_fw.sort_values(["data_type", "framework", "algorithm", "category"]).to_csv(shares_fw_csv, index=False)
     print(f"Wrote share tables to {shares_fw_ver_csv}, {shares_ver_csv}, {shares_fw_csv}")
 
     speedup_plot_kind = "bar" if args.plot == "stacked" else args.plot
     valid_keys = outcomes[
         ~outcomes["category"].isin(["invalid_code", "invalid_algorithm"])
-    ][["framework", "version", "algorithm", "repetition"]].drop_duplicates()
+    ][["data_type", "framework", "version", "algorithm", "repetition"]].drop_duplicates()
     speedups_for_plots = speedups.copy()
     speedups_for_plots["version"] = speedups_for_plots["version"].apply(normalize_version_value)
     if not valid_keys.empty:
         speedups_for_plots = speedups_for_plots.merge(
-            valid_keys, on=["framework", "version", "algorithm", "repetition"], how="inner"
+            valid_keys, on=["data_type", "framework", "version", "algorithm", "repetition"], how="inner"
         )
     else:
         speedups_for_plots = speedups_for_plots.iloc[0:0]
 
     geom_df = (
         speedups_for_plots.groupby(
-            ["framework", "version", "algorithm", "repetition"], as_index=False
+            ["data_type", "framework", "version", "algorithm", "repetition"], as_index=False
         )
         .agg(
             geom_speedup=("speedup", geometric_mean),
