@@ -205,11 +205,23 @@ The plots used in the paper are in the folder: [results/plots/](./results/plots/
 bash make_plots.sh
 ```
 
-The same command writes the attempt-level analysis to `results/plots/20260408/` and equivalent single-dataset artifacts to the `results/plots/20260408-{mini,small,medium,large,extralarge}/` directories:
+The same command writes CSV backing tables and plots to `results/plots/20260408/`
+and equivalent single-dataset artifacts to the
+`results/plots/20260408-{mini,small,medium,large,extralarge}/` directories.
 
-- `framework_prompt_summary.csv` contains validation coverage, median, IQR, and geometric-mean speedup among validated attempts, conditional `speedup_at_5`, and benchmark counts for every framework/prompt pair.
-- `failure_counts.csv` counts attempt-level compile errors, runtime errors, numerical mismatches, and timeouts. A failed attempt can contain more than one failure reason across dataset sizes, so these reason counts may overlap.
-- `best_of_k.csv` exactly enumerates all subsets of the five stored attempts for budgets 1 through 5 and reports validation probability, conditional best speedup, and expected speedup when the C implementation remains available as a fallback. `best_of_k_budget.pdf` visualizes these budget curves.
+Attempt-level artifacts:
+
+- `framework_prompt_summary.csv` has one row per framework/prompt pair. `attempt_count` is the number of framework/prompt/benchmark/repetition attempts; `validation_count` and `validation_rate` count attempts that validate on every selected dataset size; `performance_attempt_count` counts validated attempts that also have speedup data; `median_speedup`, `geometric_mean_speedup`, `speedup_q1`, `speedup_q3`, and `speedup_iqr` summarize only performance-eligible attempts; `speedup_at_5` is the conditional best speedup when all five stored attempts are available; `contributing_benchmark_count` counts benchmarks contributing to the speedup aggregate; `benchmark_count` counts covered benchmarks.
+- `failure_counts.csv` has one row per framework/prompt pair. `invalid_attempt_count` is the number of attempts that did not validate. The reason columns (`compile_error_count`, `runtime_error_count`, `numerical_mismatch_count`, `timeout_count`, `unclassified_invalid_count`) are diagnostic tags on invalid attempts, not a partition: one invalid attempt can contribute to more than one reason count across dataset sizes, so these columns need not sum to `invalid_attempt_count`.
+- `best_of_k.csv` has one row per framework/prompt/budget `k`. It exactly enumerates all subsets of the five stored attempts. `subsets_per_benchmark` is `choose(5,k)`, `subset_evaluation_count` is that value times the benchmark count, `successful_subset_count` counts benchmark/subset evaluations containing at least one validated candidate, `probability_validated_candidate` is their fraction, `conditional_best_speedup*` summarizes best speedup only among successful subset evaluations, and `expected_speedup_with_c_fallback` uses 1.0x C performance when no candidate validates or all validated candidates are slower. `best_of_k_budget.pdf` visualizes these budget curves.
+
+Other CSV backing tables:
+
+- `speedups*.csv` contains per framework/version/benchmark/repetition/dataset-size speedups relative to the selected baseline, plus the optimized and baseline runtimes used for each ratio.
+- `outcomes*.csv` classifies each framework/version/benchmark/repetition outcome into the categories used for correctness and win-rate plots.
+- `shares*.csv` aggregates those outcome categories as percentages across repetitions, grouped by framework, version, or framework/version depending on the filename.
+- `heatmap_speedups*.csv` is the matrix used by the speedup heatmap; benchmark columns contain aggregated speedups, `geom_mean` is the geometric mean across benchmark columns, and `wins` counts benchmark wins under the selected threshold.
+- `heatmap_correctness*.csv` is the matrix used by the correctness heatmap; benchmark columns contain validation shares and `mean_valid` is the arithmetic mean of those shares across benchmark columns.
 
 An attempt is a framework/prompt/benchmark/repetition tuple and is validated only if every selected dataset size validates. Its speedup is the geometric mean across those sizes. All speedups in these four artifacts use the standard C implementation as the baseline; invalid attempts remain in coverage and probability denominators but are excluded from performance aggregates. Conditional best speedup is aggregated over successful benchmark/subset evaluations with a geometric mean; `speedup_at_5` is its value for the full set of five attempts.
 
@@ -230,6 +242,10 @@ To regenerate the numbers presented in the paper, run the following command:
 ```bash
 bash paper_numbers.sh | tee paper_numbers.txt
 ```
+
+The optimization failure-category summary printed by this script is read from
+`results/plots/20260408/failure_counts.csv`; it does not rerun experiments or
+regenerate LLM outputs.
 
 ## 🔄 Regenerating the OpenAI request batch files
 
