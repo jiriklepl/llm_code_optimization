@@ -1,6 +1,7 @@
 #!/bin/bash
 
 #SBATCH --partition=mpi-homo-long
+#SBATCH --account=kdss
 #SBATCH --output=batch-%j.out
 #SBATCH --error=batch-%j.err
 #SBATCH --time=7-00:00:00
