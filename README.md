@@ -105,7 +105,7 @@ And finally, for the tasks involving the abstract optimization tasks:
 ```bash
 # Send to_model requests to OpenAI (can cost over $50 and take almost 2 hours)
 #   (this prepares the abstract optimization plans discussed in the paper)
-./collect_optimizations.sh to_model
+./collect_models.sh
 
 
 # Regenerate the batch request files (updates the optimization requests)
@@ -189,10 +189,10 @@ Alternatively, if you use Charliecloud, run:
 cd compilot
 
 # Prepare the Charliecloud image for the Tiramisu framework
-bash charlie-prepare.sh
+bash ch-prepare.sh
 
 # Run the Tiramisu measurements inside the Charliecloud container
-bash charlie-invoke.sh
+bash ch-invoke.sh
 ```
 
 The [compilot/README.md](./compilot/README.md) file contains full instructions on how to run the Tiramisu baseline using Docker or Charliecloud.

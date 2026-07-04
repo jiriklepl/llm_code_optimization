@@ -190,7 +190,7 @@ for DATASET_SIZE in "${DATASET_SIZEs[@]}"; do
 
 					status_column=$(echo "${validation}" | awk -F, '{print $6}')
 					if [[ ${status_column} == "true" || ${status_column} == "valid" ]]; then
-						run "${algorithm}" "${framework}" "${version}" "${runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"','"${DATA_TYPE}"'"}' | tee -a "${times_file}"
+						run "${algorithm}" "${framework}" "${version}" "${actual_runs}" | awk '{print  $0 ",'"${rep}"','"${DATASET_SIZE}"','"${DATA_TYPE}"'"}' | tee -a "${times_file}"
 					fi
 				done
 			done 2>> "${error_file}" | tee -a "${output_file}"

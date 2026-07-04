@@ -1785,10 +1785,10 @@ check_translation() {
                         if [ -n "${baseline_time}" ] && [ -n "${translated_time}" ]; then
                             local speedup_output
                             if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${translated_time}")"; then
-                                local formatted_baseline formatted_translated speedup
+                                local _formatted_baseline formatted_translated speedup
                                 local old_ifs="${IFS}"
                                 IFS=' '
-                                read -r formatted_baseline formatted_translated speedup <<<"${speedup_output}"
+                                read -r _formatted_baseline formatted_translated speedup <<<"${speedup_output}"
                                 IFS="${old_ifs}"
                                 runtime_value="${formatted_translated}"
                                 speedup_value="${speedup}"
@@ -2177,10 +2177,10 @@ check_optimization() {
                             if [ -n "${baseline_time}" ] && [ -n "${optimized_time}" ]; then
                                 local speedup_output
                                 if speedup_output="$(python3 ../scripts/compute_speedup.py "${baseline_time}" "${optimized_time}")"; then
-                                    local formatted_baseline formatted_optimized speedup
+                                    local _formatted_baseline formatted_optimized speedup
                                     local old_ifs="${IFS}"
                                     IFS=' '
-                                    read -r formatted_baseline formatted_optimized speedup <<<"${speedup_output}"
+                                    read -r _formatted_baseline formatted_optimized speedup <<<"${speedup_output}"
                                     IFS="${old_ifs}"
                                     runtime_value="${formatted_optimized}"
                                     speedup_value="${speedup}"

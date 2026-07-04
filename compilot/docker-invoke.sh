@@ -4,7 +4,7 @@ set -euo pipefail
 
 possible_types=(MINI SMALL MEDIUM LARGE XLARGE ALL)
 
-if [[ $# -ne 1 || ! " ${possible_types[*]} " =~ " $1 " ]]; then
+if [[ $# -ne 1 ]] || [[ " ${possible_types[*]} " != *" ${1:-} "* ]]; then
   echo "Error: TYPE argument not correct."
   echo "Usage: $0 <TYPE=MINI|SMALL|MEDIUM|LARGE|XLARGE>"
   exit 1
