@@ -1,0 +1,17 @@
+data_type,framework,prompt,attempt_count,validated_attempt_count,invalid_attempt_count,compile_error_count,runtime_error_count,numerical_mismatch_count,timeout_count,unclassified_invalid_count,benchmark_count
+DOUBLE,c,AllHints,130,112,18,9,0,8,1,0,26
+DOUBLE,c,ChooseHints,130,113,17,10,1,5,1,0,26
+DOUBLE,c,FromPlan,130,118,12,7,0,5,0,0,26
+DOUBLE,c,Naive,130,118,12,7,0,5,0,0,26
+DOUBLE,exo,AllHints,130,89,41,34,0,7,0,0,26
+DOUBLE,exo,ChooseHints,130,87,43,38,0,5,0,0,26
+DOUBLE,exo,FromPlan,130,56,74,73,0,1,0,0,26
+DOUBLE,exo,Naive,130,81,49,44,0,5,0,0,26
+DOUBLE,halide,AllHints,130,25,105,47,52,6,0,0,26
+DOUBLE,halide,ChooseHints,130,28,102,44,53,5,0,0,26
+DOUBLE,halide,FromPlan,130,23,107,40,66,1,0,0,26
+DOUBLE,halide,Naive,130,32,98,36,55,7,0,0,26
+DOUBLE,noarr,AllHints,130,110,20,13,0,7,0,0,26
+DOUBLE,noarr,ChooseHints,130,108,22,13,0,9,0,0,26
+DOUBLE,noarr,FromPlan,130,98,32,24,2,6,0,0,26
+DOUBLE,noarr,Naive,130,107,23,15,0,8,0,0,26

@@ -6,12 +6,12 @@ export BUILD_DIR=${BUILD_DIR:-build}
 export DATASET_SIZE=${DATASET_SIZE:-LARGE}
 export DATA_TYPE=${DATA_TYPE:-DOUBLE}
 export NPROC=${NPROC:-$(nproc)}
-export POLLY_C_COMPILER=${POLLY_C_COMPILER:-clang-21}
+export POLLY_C_COMPILER=${POLLY_C_COMPILER:-clang-22}
 SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if ! command -v "${POLLY_C_COMPILER}" >/dev/null 2>&1; then
 	echo "Polly compiler '${POLLY_C_COMPILER}' was not found." >&2
-	echo "Install Clang/LLVM 21 with Polly and OpenMP, or set POLLY_C_COMPILER." >&2
+	echo "Install Clang/LLVM 22 with Polly and OpenMP, or set POLLY_C_COMPILER." >&2
 	exit 1
 fi
 
@@ -26,7 +26,7 @@ if [ -z "${POLLY_OPENMP_LIBRARY}" ] || [ "${POLLY_OPENMP_LIBRARY}" = "libomp.so"
 	for candidate in \
 		"$(dirname "${POLLY_C_COMPILER}")/../lib/libomp.so" \
 		"$(dirname "${POLLY_C_COMPILER}")/../lib/llvm/libomp.so" \
-		"/usr/lib/llvm-21/lib/libomp.so" \
+		"/usr/lib/llvm-22/lib/libomp.so" \
 		"/usr/lib/x86_64-linux-gnu/libomp.so" \
 		"/lib/x86_64-linux-gnu/libomp.so"; do
 		if [ -f "${candidate}" ]; then
@@ -52,7 +52,7 @@ if [ -f "${POLLY_OPENMP_LIBRARY}" ]; then
 	fi
 else
 	echo "Could not find libomp for '${POLLY_C_COMPILER}'." >&2
-	echo "Install the matching LLVM OpenMP runtime, e.g. libomp-21-dev, or expose libomp.so to the compiler." >&2
+	echo "Install the matching LLVM OpenMP runtime, e.g. libomp-22-dev, or expose libomp.so to the compiler." >&2
 	exit 1
 fi
 

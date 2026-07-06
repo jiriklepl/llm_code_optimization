@@ -25,11 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "failure_counts_csv",
         nargs="?",
-        default="results/plots/20260408/failure_counts.csv",
+        default="results/plots/20260704/failure_counts.csv",
         type=Path,
         help=(
             "CSV produced by scripts/analyze_attempts.py "
-            "(default: results/plots/20260408/failure_counts.csv)."
+            "(default: results/plots/20260704/failure_counts.csv)."
         ),
     )
     return parser.parse_args()

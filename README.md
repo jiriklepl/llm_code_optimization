@@ -22,13 +22,13 @@ cd replication-package
 ## 📋 Prerequisites
 
 - GCC 15.2 or higher with OpenMP support.
-- Clang/LLVM 21 with Polly and OpenMP support for the optional Polly baseline.
+- Clang/LLVM 22.1.8 with Polly and the matching LLVM OpenMP runtime for the optional Polly baseline.
 - CMake 4.12 or higher.
 - Python 3.13 or higher.
 - Docker or Charliecloud installed on your system.
 - An OpenAI API key for accessing the GPT models, if you plan to run the code generation tasks.
 
-The experiments were performed on a dual-socket system equipped with Intel Xeon Gold 6130 processors, each comprising 16 cores with 2-way hyper-threading (64 threads in total). The C and LLM-generated benchmarks were compiled with GCC 15.2; the Polly baseline uses Clang/LLVM 21. CMake 4.12 was used for both.
+The experiments were performed on a dual-socket system equipped with Intel Xeon Gold 6130 processors, each comprising 16 cores with 2-way hyper-threading (64 threads in total). The 20260704 C, Noarr, Halide, and Exo measurements were compiled with GCC 15.2 and GNU OpenMP. The Polly baseline was compiled with Clang/LLVM 22.1.8, Polly passes, and LLVM `libomp`. CMake 4.12 was used for the CMake-based builds.
 
 ## 📂 Project Structure
 
@@ -48,7 +48,7 @@ The project is organized as follows:
 - [gpt-querying](./gpt-querying): Contains the code and scripts for querying the LLMs. The OpenAI API should be stored at [gpt-querying/.env](./gpt-querying/.env).
 - [requests](./requests): Contains the batch request files sent to the LLMs.
 - [responses](./responses): Contains the responses received from the LLMs.
-- [results](./results): Contains the measurement results and visualizations (note that only `results/*/20260408` contain detailed validity results in the included csv files).
+- [results](./results): Contains the measurement results and visualizations (note that `results/*/20260704` is the current measurement set with detailed validity results in the included CSV files).
   - [results/translation](./results/translation): Contains the results of the code translation tasks.
     - [results/translation/20251118_155818](./results/translation/20251118_155818) is the special preselection run used to choose the translated baselines. It is intentionally retained and is not superseded by the newer measurement results.
   - [results/optimization](./results/optimization): Contains the results of the optimization tasks.
@@ -150,7 +150,25 @@ being mixed in the same report directory.
 
 Then collect all folders filled by these scripts into two new folders `TRANSLATION_DIR` and `OPTIMIZATION_DIR` (choose any names)
 
-Our measurement results are in the folders: [results/translation/20260408](./results/translation/20260408) and [results/optimization/20260408](./results/optimization/20260408).
+Our current measurement results are in the folders: [results/translation/20260704](./results/translation/20260704) and [results/optimization/20260704](./results/optimization/20260704).
+
+### Compiler configuration used for the reported results
+
+The 20260704 measurements use `DATA_TYPE=DOUBLE`. The standard C, Noarr, and
+Halide builds use CMake `Release` builds with dataset and datatype defines,
+OpenMP enabled, and native CPU flags (`-fopenmp -pthread -march=native
+-mtune=native`). The Exo build generates C from Exo and then compiles with GCC
+using `-O3`, OpenMP, native CPU flags, `POLYBENCH_TIME`,
+`POLYBENCH_DUMP_ARRAYS`, and matching dataset/datatype defines.
+
+The Polly baseline uses `PolybenchC-Polly/build.sh`, whose default compiler is
+`clang-22`. It enables `-mllvm -polly`,
+`-mllvm -polly-vectorizer=stripmine`, and `-mllvm -polly-parallel`, and uses
+LLVM OpenMP via `-fopenmp=libomp`. Set `POLLY_C_COMPILER` if the Polly-capable
+Clang executable has a different name or path.
+
+The Tiramisu baseline is measured inside the Compilot container environment;
+the exact container recipe is in [compilot/Dockerfile.compilot](./compilot/Dockerfile.compilot).
 
 ### Measuring the Polly baseline
 
@@ -166,7 +184,7 @@ implementation:
 The default `./measure_translations.sh all all` command includes Polly as well
 as the LLM-generated Noarr, Halide, and Exo translations. Set
 `POLLY_C_COMPILER` to select another installed Clang executable that provides
-the Polly passes; the default is `clang-21`. Polly measurements use the same
+the Polly passes; the default is `clang-22`. Polly measurements use the same
 `DATA_TYPE` setting as the translation measurements.
 
 ### Measuring the Tiramisu baseline
@@ -231,9 +249,18 @@ The plots used in the paper are in the folder: [results/plots/](./results/plots/
 bash make_plots.sh
 ```
 
-The same command writes CSV backing tables and plots to `results/plots/20260408/`
+The same command writes CSV backing tables and plots to `results/plots/20260704/`
 and equivalent single-dataset artifacts to the
-`results/plots/20260408-{mini,small,medium,large,extralarge}/` directories.
+`results/plots/20260704-{mini,small,medium,large,extralarge}/` directories.
+It also writes EXTRALARGE fixed-baseline comparisons to
+`results/plots/20260704-extralarge-tiramisu/` and
+`results/plots/20260704-extralarge-polly/`, plus the composite
+`results/plots/20260704-extralarge-min-c-polly/` baseline that uses the faster
+of standard C and standard Polly per datatype, benchmark, and dataset size. Set
+`RESULTS_TAG` to regenerate the same plot family for a different result set.
+Polly and Tiramisu are fixed baselines rather than five-attempt LLM result
+families, so `make_plots.sh` excludes them from generated-attempt summaries and
+plots alternate-baseline comparisons separately.
 All backing CSVs that contain measured or derived benchmark results report
 `data_type`. Legacy CSVs without this column are interpreted as `DOUBLE` by the
 analysis scripts. Aggregations and best-candidate selection are performed
@@ -243,7 +270,7 @@ Attempt-level artifacts:
 
 - `framework_prompt_summary.csv` has one row per datatype/framework/prompt tuple. `attempt_count` is the number of framework/prompt/benchmark/repetition attempts; `validation_count` and `validation_rate` count attempts that validate on every selected dataset size; `performance_attempt_count` counts validated attempts that also have speedup data; `median_speedup`, `geometric_mean_speedup`, `speedup_q1`, `speedup_q3`, and `speedup_iqr` summarize only performance-eligible attempts; `speedup_at_5` is the conditional best speedup when all five stored attempts are available; `contributing_benchmark_count` counts benchmarks contributing to the speedup aggregate; `benchmark_count` counts covered benchmarks.
 - `failure_counts.csv` has one row per datatype/framework/prompt tuple. `invalid_attempt_count` is the number of attempts that did not validate. The reason columns (`compile_error_count`, `runtime_error_count`, `numerical_mismatch_count`, `timeout_count`, `unclassified_invalid_count`) are diagnostic tags on invalid attempts, not a partition: one invalid attempt can contribute to more than one reason count across dataset sizes, so these columns need not sum to `invalid_attempt_count`.
-- `best_of_k.csv` has one row per datatype/framework/prompt/budget `k`. It exactly enumerates all subsets of the five stored attempts. `subsets_per_benchmark` is `choose(5,k)`, `subset_evaluation_count` is that value times the benchmark count, `successful_subset_count` counts benchmark/subset evaluations containing at least one validated candidate, `probability_validated_candidate` is their fraction, `conditional_best_speedup*` summarizes best speedup only among successful subset evaluations, and `expected_speedup_with_c_fallback` uses 1.0x C performance when no candidate validates or all validated candidates are slower. `best_of_k_budget.pdf` visualizes these budget curves.
+- `best_of_k.csv` has one row per datatype/framework/prompt/budget `k`. It exactly enumerates all subsets of the five stored attempts. `subsets_per_benchmark` is `choose(5,k)`, `subset_evaluation_count` is that value times the benchmark count, `successful_subset_count` counts benchmark/subset evaluations containing at least one validated candidate, `probability_validated_candidate` is their fraction, `conditional_best_speedup*` summarizes best speedup only among successful subset evaluations, and `expected_speedup_with_c_fallback` uses the standard C implementation when no candidate validates or all validated candidates are slower than C. In C-baseline outputs this fallback is 1.0x; in non-C-baseline outputs it is C performance expressed on the selected baseline's speedup scale. `best_of_k_budget.pdf` visualizes these budget curves.
 
 Other CSV backing tables:
 
@@ -281,7 +308,7 @@ bash paper_numbers.sh | tee paper_numbers.txt
 ```
 
 The optimization failure-category summary printed by this script is read from
-`results/plots/20260408/failure_counts.csv`; it does not rerun experiments or
+`results/plots/20260704/failure_counts.csv`; it does not rerun experiments or
 regenerate LLM outputs.
 
 ## 🔄 Regenerating the OpenAI request batch files

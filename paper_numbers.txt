@@ -2,13 +2,13 @@ Exo non-valid translations: 12
 Noarr non-valid translations: 30
 Halide non-valid translations: 67
 Optimization failure-category summary
-Source: results/plots/20260408/failure_counts.csv
+Source: results/plots/20260704/failure_counts.csv
 All frameworks total optimization attempts: 2080
 All frameworks validated attempts: 1258
 All frameworks invalid attempts: 822
 All frameworks compile-error diagnostic count: 454
 All frameworks runtime-error diagnostic count: 276
-All frameworks numerical-mismatch diagnostic count: 92
+All frameworks numerical-mismatch diagnostic count: 91
 All frameworks timeout diagnostic count: 10
 All frameworks unclassified-invalid diagnostic count: 0
 By framework:
@@ -17,7 +17,7 @@ By framework:
   c invalid attempts: 60
   c compile-error diagnostic count: 33
   c runtime-error diagnostic count: 1
-  c numerical-mismatch diagnostic count: 24
+  c numerical-mismatch diagnostic count: 23
   c timeout diagnostic count: 3
   c unclassified-invalid diagnostic count: 0
   exo total optimization attempts: 520

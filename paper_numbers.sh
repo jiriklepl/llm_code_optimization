@@ -2,11 +2,23 @@
 
 set -euo pipefail
 
-echo "Exo non-valid translations: $(grep  "^exo" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
-echo "Noarr non-valid translations: $(grep  "^noarr" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
-echo "Halide non-valid translations: $(grep  "^halide" <(cat ./results/translation/20260408/*/vali*.csv) | grep -v ,valid, | cut -d, -f2,6 | sort -u | wc -l)"
+results_tag="${RESULTS_TAG:-20260704}"
+translation_results_dir="./results/translation/${results_tag}"
+failure_counts_csv="results/plots/${results_tag}/failure_counts.csv"
 
-python3 scripts/summarize_failure_counts.py results/plots/20260408/failure_counts.csv
+count_nonvalid_translations() {
+	local framework="$1"
+	find "${translation_results_dir}" -mindepth 2 -maxdepth 2 -name 'validation_*.csv' -exec \
+		awk -F, -v framework="${framework}" '$1 == framework && $5 != "valid" { print $2 "," $6 }' {} + |
+		sort -u |
+		wc -l
+}
+
+echo "Exo non-valid translations: $(count_nonvalid_translations exo)"
+echo "Noarr non-valid translations: $(count_nonvalid_translations noarr)"
+echo "Halide non-valid translations: $(count_nonvalid_translations halide)"
+
+python3 scripts/summarize_failure_counts.py "${failure_counts_csv}"
 
 read -r tot_tokens num_files < <(find optimization/c_all_hints -name "costs.json" -exec jq '.output_tokens, .reasoning_tokens' {} + | grep -E '[0-9]+' | awk '{s+=$1; c++} END {print s " " c}')
 

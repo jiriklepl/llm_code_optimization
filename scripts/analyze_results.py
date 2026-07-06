@@ -15,8 +15,18 @@ from matplotlib.patches import Rectangle
 
 
 BASELINE_FRAMEWORK = "c"
+MIN_C_POLLY_BASELINE = "min-c-polly"
 DEFAULT_DATA_TYPE = "DOUBLE"
 SETTING_COLUMNS = ["data_type"]
+BASELINE_COLUMNS = [
+    "data_type",
+    "algorithm",
+    "dataset_size",
+    "baseline_time_s",
+    "baseline_framework",
+    "baseline_version",
+    "baseline_repetition",
+]
 TUNING_BENCHMARKS = ("2mm", "floyd-warshall", "gemm", "heat-3d")
 VALID_STATUS_TRUE = {"valid", "true"}
 VALIDITY_FAILURE_STATUSES = {"invalid", "false", "validity_error"}
@@ -226,17 +236,7 @@ def select_best_standard_baseline(
 
     required_sizes = {str(size) for size in dataset_sizes}
     if times_df.empty or not required_sizes:
-        return pd.DataFrame(
-            columns=[
-                "data_type",
-                "algorithm",
-                "dataset_size",
-                "baseline_time_s",
-                "baseline_framework",
-                "baseline_version",
-                "baseline_repetition",
-            ]
-        )
+        return pd.DataFrame(columns=BASELINE_COLUMNS)
 
     df = times_df.copy()
     df = normalize_data_type_column(df)
@@ -247,17 +247,7 @@ def select_best_standard_baseline(
         & (df["version_norm"] == "standard")
         & (df["dataset_size"].isin(required_sizes))
     ].copy()
-    empty_template = pd.DataFrame(
-        columns=[
-            "data_type",
-            "algorithm",
-            "dataset_size",
-            "baseline_time_s",
-            "baseline_framework",
-            "baseline_version",
-            "baseline_repetition",
-        ]
-    )
+    empty_template = pd.DataFrame(columns=BASELINE_COLUMNS)
     if df.empty:
         return empty_template
 
@@ -295,34 +285,86 @@ def select_best_standard_baseline(
     chosen["baseline_framework"] = baseline_framework
     chosen["baseline_version"] = chosen["version"].apply(format_version_label)
     chosen["baseline_repetition"] = chosen["repetition"]
-    return chosen[
-        [
-            "data_type",
-            "algorithm",
-            "dataset_size",
-            "baseline_time_s",
-            "baseline_framework",
-            "baseline_version",
-            "baseline_repetition",
-        ]
+    return chosen[BASELINE_COLUMNS]
+
+
+def normalize_baseline_spec(baseline: str | None) -> str:
+    """Normalize baseline selector aliases used by CLI tools."""
+
+    cleaned = (baseline or BASELINE_FRAMEWORK).strip()
+    if cleaned in {"min(c,polly)", "min(c, polly)", "min-c-polly", "c-polly-min"}:
+        return MIN_C_POLLY_BASELINE
+    return cleaned
+
+
+def baseline_framework_candidates(baseline: str) -> set[str]:
+    """Return frameworks needed to build a baseline table."""
+
+    if baseline == MIN_C_POLLY_BASELINE:
+        return {BASELINE_FRAMEWORK, "polly"}
+    return {baseline}
+
+
+def select_min_standard_baseline(
+    times_df: pd.DataFrame,
+    *,
+    baseline_frameworks: Sequence[str],
+    dataset_sizes: Sequence[str],
+) -> pd.DataFrame:
+    """Pick the fastest standard baseline row among the given frameworks."""
+
+    frames = [
+        select_best_standard_baseline(
+            times_df, baseline_framework=framework, dataset_sizes=dataset_sizes
+        )
+        for framework in baseline_frameworks
     ]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return pd.DataFrame(columns=BASELINE_COLUMNS)
+
+    combined = pd.concat(frames, ignore_index=True)
+    return (
+        combined.sort_values(
+            [
+                "data_type",
+                "algorithm",
+                "dataset_size",
+                "baseline_time_s",
+                "baseline_framework",
+                "baseline_repetition",
+            ]
+        )
+        .groupby(["data_type", "algorithm", "dataset_size"], as_index=False)
+        .first()
+    )[BASELINE_COLUMNS]
+
+
+def select_standard_baseline(
+    times_df: pd.DataFrame,
+    *,
+    baseline: str,
+    dataset_sizes: Sequence[str],
+) -> pd.DataFrame:
+    """Select the requested standard baseline table."""
+
+    baseline = normalize_baseline_spec(baseline)
+    if baseline == MIN_C_POLLY_BASELINE:
+        return select_min_standard_baseline(
+            times_df,
+            baseline_frameworks=[BASELINE_FRAMEWORK, "polly"],
+            dataset_sizes=dataset_sizes,
+        )
+    return select_best_standard_baseline(
+        times_df, baseline_framework=baseline, dataset_sizes=dataset_sizes
+    )
 
 
 def merge_baseline_tables(primary: pd.DataFrame, fallback: pd.DataFrame | None) -> pd.DataFrame:
     """Use primary baseline rows, filling missing algorithms from fallback."""
 
     if primary is None:
-        primary = pd.DataFrame(
-            columns=[
-                "data_type",
-                "algorithm",
-                "dataset_size",
-                "baseline_time_s",
-                "baseline_framework",
-                "baseline_version",
-                "baseline_repetition",
-            ]
-        )
+        primary = pd.DataFrame(columns=BASELINE_COLUMNS)
     if fallback is None or fallback.empty:
         return primary.copy()
 
@@ -2585,6 +2627,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.best_only:
         args.best = "pick"
+    args.baseline = normalize_baseline_spec(args.baseline)
 
     dataset_size_filter = normalize_cli_args(args.dataset_sizes)
     data_type_filter = normalize_cli_args(args.data_types)
@@ -2671,7 +2714,7 @@ def main() -> None:
     optimization_times_raw = append_standard_version(optimization_times_raw, standard_runs)
     optimization_times_full = append_standard_version(optimization_times_full, standard_runs_full)
 
-    baseline_frameworks = {args.baseline}
+    baseline_frameworks = baseline_framework_candidates(args.baseline)
     if args.baseline != BASELINE_FRAMEWORK:
         baseline_frameworks.add(BASELINE_FRAMEWORK)
 
@@ -2694,8 +2737,8 @@ def main() -> None:
     if not considered_sizes:
         raise RuntimeError("No overlapping dataset sizes between translation and optimization runs.")
 
-    primary_baseline = select_best_standard_baseline(
-        baseline_source_df, baseline_framework=args.baseline, dataset_sizes=considered_sizes
+    primary_baseline = select_standard_baseline(
+        baseline_source_df, baseline=args.baseline, dataset_sizes=considered_sizes
     )
     fallback_baseline = (
         select_best_standard_baseline(
@@ -2703,15 +2746,7 @@ def main() -> None:
         )
         if args.baseline != BASELINE_FRAMEWORK
         else pd.DataFrame(
-            columns=[
-                "data_type",
-                "algorithm",
-                "dataset_size",
-                "baseline_time_s",
-                "baseline_framework",
-                "baseline_version",
-                "baseline_repetition",
-            ]
+            columns=BASELINE_COLUMNS
         )
     )
     baseline_table = merge_baseline_tables(primary_baseline, fallback_baseline)

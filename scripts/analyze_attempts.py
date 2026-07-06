@@ -3,8 +3,9 @@
 
 An attempt is one (framework, prompt, benchmark, repetition) tuple.  It is
 validated only when every selected dataset size is valid.  Attempt speedup is
-the geometric mean across those dataset sizes, always relative to the selected
-standard C baseline.
+the geometric mean across those dataset sizes, relative to the selected
+standard baseline framework. The expected-speedup fallback remains the standard
+C implementation.
 """
 
 from __future__ import annotations
@@ -33,9 +34,12 @@ from analyze_results import (
     geometric_mean,
     load_and_aggregate_times,
     load_and_aggregate_validation,
+    merge_baseline_tables,
     normalize_cli_args,
+    normalize_baseline_spec,
     normalize_version_column,
     select_best_standard_baseline,
+    select_standard_baseline,
 )
 
 
@@ -64,6 +68,7 @@ def build_attempt_table(
     validation: pd.DataFrame,
     speedups: pd.DataFrame,
     dataset_sizes: Sequence[str],
+    c_fallback_speedups: dict[tuple[str, str], float],
 ) -> pd.DataFrame:
     """Collapse per-dataset validation and timing data into attempts."""
 
@@ -92,6 +97,14 @@ def build_attempt_table(
             if validated and has_complete_speedup
             else math.nan
         )
+        baseline_framework = (
+            "|".join(sorted(speedup_group["baseline_framework"].astype(str).unique()))
+            if has_complete_speedup
+            else ""
+        )
+        c_fallback_speedup = c_fallback_speedups.get(
+            (str(data_type), str(benchmark)), 1.0
+        )
         failure_flags = {
             "compile_error": "compile_error" in statuses or "illegal" in statuses,
             "runtime_error": "runtime_error" in statuses,
@@ -111,6 +124,8 @@ def build_attempt_table(
                 "validated": validated,
                 "performance_eligible": validated and np.isfinite(attempt_speedup),
                 "attempt_speedup": attempt_speedup,
+                "baseline_framework": baseline_framework,
+                "c_fallback_speedup": c_fallback_speedup,
                 "validated_dataset_count": int(group["valid"].sum()),
                 "expected_dataset_count": len(expected_sizes),
                 "failure_reasons": failure_reasons,
@@ -186,12 +201,22 @@ def enumerate_best_of_k(attempts: pd.DataFrame) -> pd.DataFrame:
                         ),
                         "has_validated_candidate": not validated.empty,
                         "conditional_best_speedup": best_speedup,
-                        # The C implementation remains available when no generated
-                        # candidate validates or when every candidate is slower.
+                        "baseline_framework": "|".join(
+                            sorted(
+                                value
+                                for value in ordered["baseline_framework"].astype(str).unique()
+                                if value
+                            )
+                        ),
+                        "c_fallback_speedup": float(
+                            ordered["c_fallback_speedup"].iloc[0]
+                        ),
+                        # The standard C implementation remains available when no
+                        # generated candidate validates or when every candidate is slower.
                         "best_speedup_with_c_fallback": (
-                            max(1.0, best_speedup)
+                            max(float(ordered["c_fallback_speedup"].iloc[0]), best_speedup)
                             if np.isfinite(best_speedup)
-                            else 1.0
+                            else float(ordered["c_fallback_speedup"].iloc[0])
                         ),
                     }
                 )
@@ -209,6 +234,13 @@ def summarize_best_of_k(subsets: pd.DataFrame) -> pd.DataFrame:
         conditional = successful["conditional_best_speedup"].dropna()
         fallback_speedups = group["best_speedup_with_c_fallback"]
         expected_speedup = geometric_mean(fallback_speedups)
+        baseline_framework = "|".join(
+            sorted(
+                value
+                for value in group["baseline_framework"].astype(str).unique()
+                if value
+            )
+        )
         rows.append(
             {
                 "data_type": data_type,
@@ -231,7 +263,7 @@ def summarize_best_of_k(subsets: pd.DataFrame) -> pd.DataFrame:
                 "conditional_speedup_sample_count": len(conditional),
                 "expected_speedup_with_c_fallback": expected_speedup,
                 "expected_improvement_over_c_pct": (expected_speedup - 1.0) * 100.0,
-                "baseline_framework": BASELINE_FRAMEWORK,
+                "baseline_framework": baseline_framework,
             }
         )
     return pd.DataFrame.from_records(rows)
@@ -272,7 +304,13 @@ def summarize_framework_prompt(
                 "speedup_at_5": speedup_at_5.get((data_type, framework, prompt), math.nan),
                 "contributing_benchmark_count": eligible["benchmark"].nunique(),
                 "benchmark_count": group["benchmark"].nunique(),
-                "baseline_framework": BASELINE_FRAMEWORK,
+                "baseline_framework": "|".join(
+                    sorted(
+                        value
+                        for value in group["baseline_framework"].astype(str).unique()
+                        if value
+                    )
+                ),
             }
         )
     return pd.DataFrame.from_records(rows)
@@ -349,10 +387,48 @@ def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
+def compute_c_fallback_speedups(
+    baseline_table: pd.DataFrame, c_baseline: pd.DataFrame
+) -> dict[tuple[str, str], float]:
+    """Return selected-baseline-relative speedup for falling back to standard C."""
+
+    if baseline_table.empty or c_baseline.empty:
+        return {}
+
+    selected = baseline_table[
+        ["data_type", "algorithm", "dataset_size", "baseline_time_s"]
+    ].rename(columns={"baseline_time_s": "selected_baseline_time_s"})
+    c_rows = c_baseline[
+        ["data_type", "algorithm", "dataset_size", "baseline_time_s"]
+    ].rename(columns={"baseline_time_s": "c_time_s"})
+    merged = selected.merge(c_rows, on=["data_type", "algorithm", "dataset_size"], how="inner")
+    if merged.empty:
+        return {}
+
+    merged["c_fallback_speedup"] = merged["selected_baseline_time_s"] / merged["c_time_s"]
+    merged = merged[np.isfinite(merged["c_fallback_speedup"]) & (merged["c_fallback_speedup"] > 0)]
+
+    fallback: dict[tuple[str, str], float] = {}
+    for (data_type, algorithm), group in merged.groupby(["data_type", "algorithm"]):
+        fallback[(str(data_type), str(algorithm))] = geometric_mean(
+            group["c_fallback_speedup"]
+        )
+    return fallback
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("translation_path")
     parser.add_argument("optimization_path")
+    parser.add_argument(
+        "--baseline",
+        default=BASELINE_FRAMEWORK,
+        help=(
+            "Framework to use as the standard baseline. Per algorithm, the best "
+            "standard repetition covering all dataset sizes is chosen; if unavailable, "
+            "falls back to 'c' for that algorithm."
+        ),
+    )
     parser.add_argument("--output-dir", default="results/plots/attempt_analysis")
     parser.add_argument("--dataset-size", dest="dataset_sizes", action="append")
     parser.add_argument("--data-type", dest="data_types", action="append")
@@ -372,6 +448,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.baseline = normalize_baseline_spec(args.baseline)
     translation_root = Path(args.translation_path)
     optimization_root = Path(args.optimization_path)
     output_dir = Path(args.output_dir)
@@ -438,19 +515,36 @@ def main() -> None:
         & set(translation_times["dataset_size"].astype(str))
     )
     if not selected_sizes:
-        raise RuntimeError("No dataset sizes overlap between optimization and C baseline data")
+        raise RuntimeError("No dataset sizes overlap between optimization and baseline data")
 
     validate_five_attempts(optimization_validation)
     valid_translation_times = apply_validation_filter(
         translation_times, translation_validation
+    )
+
+    primary_baseline = select_standard_baseline(
+        valid_translation_times,
+        baseline=args.baseline,
+        dataset_sizes=selected_sizes,
     )
     c_baseline = select_best_standard_baseline(
         valid_translation_times,
         baseline_framework=BASELINE_FRAMEWORK,
         dataset_sizes=selected_sizes,
     )
+    fallback_baseline = (
+        c_baseline
+        if args.baseline != BASELINE_FRAMEWORK
+        else None
+    )
+    baseline_table = merge_baseline_tables(primary_baseline, fallback_baseline)
+    if baseline_table.empty:
+        raise RuntimeError(
+            "No complete standard baseline is available for the requested framework(s)"
+        )
     if c_baseline.empty:
-        raise RuntimeError("No complete standard C baseline is available")
+        raise RuntimeError("No complete standard C baseline is available for fallback")
+    c_fallback_speedups = compute_c_fallback_speedups(baseline_table, c_baseline)
 
     valid_optimization_times = apply_validation_filter(
         optimization_times, optimization_validation
@@ -458,13 +552,11 @@ def main() -> None:
     speedups = compute_speedups(
         valid_translation_times,
         valid_optimization_times,
-        baseline_table=c_baseline,
+        baseline_table=baseline_table,
     )
-    if not speedups.empty and set(speedups["baseline_framework"]) != {BASELINE_FRAMEWORK}:
-        raise AssertionError("Attempt speedups must all use the C baseline")
 
     attempts = build_attempt_table(
-        optimization_validation, speedups, selected_sizes
+        optimization_validation, speedups, selected_sizes, c_fallback_speedups
     )
     subsets = enumerate_best_of_k(attempts)
     budget = summarize_best_of_k(subsets)
