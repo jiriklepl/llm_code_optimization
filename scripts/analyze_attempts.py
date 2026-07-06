@@ -102,9 +102,13 @@ def build_attempt_table(
             if has_complete_speedup
             else ""
         )
-        c_fallback_speedup = c_fallback_speedups.get(
-            (str(data_type), str(benchmark)), 1.0
-        )
+        fallback_key = (str(data_type), str(benchmark))
+        if fallback_key not in c_fallback_speedups:
+            raise RuntimeError(
+                "Missing standard C fallback speedup for "
+                f"{data_type}/{benchmark}"
+            )
+        c_fallback_speedup = c_fallback_speedups[fallback_key]
         failure_flags = {
             "compile_error": "compile_error" in statuses or "illegal" in statuses,
             "runtime_error": "runtime_error" in statuses,
