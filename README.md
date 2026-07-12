@@ -55,6 +55,61 @@ The project is organized as follows:
   - [results/plots](./results/plots): Contains the plots generated from the results.
 - [scripts](./scripts): Contains utility scripts for analysis and visualization.
 
+## 🗺️ Paper section to artifact map
+
+This map links the manuscript methodology and evaluation sections to the main
+artifact files. It is intended for traceability; the paper cites the replication
+package, while low-level paths are documented here.
+
+- Methodology / translation: prompt templates are in `prompts/translation/`;
+  request and response batches are in `requests/openai/translation/` and
+  `responses/openai/translation/`; parsed generated translations are in
+  `generated/{exo,halide,noarr}/full/<benchmark>-<attempt>/code.cpp`;
+  measurement outputs are in `results/translation/20260704/`.
+- Methodology / direct optimization: prompt templates are in
+  `prompts/optimization/`; request and response batches are in
+  `requests/openai/optimization/` and `responses/openai/optimization/`; parsed
+  generated attempts are in
+  `optimization/<framework>_<prompt>/full/<benchmark>-<attempt>/code.cpp` for
+  the prompt/framework naming used by the batch files; measurement
+  outputs are in `results/optimization/20260704/`.
+- Methodology / abstract optimization plan: plan prompts, requests, and
+  responses are in `prompts/to_model/`, `requests/openai/to_model/`, and
+  `responses/openai/to_model/`; parsed plans are in
+  `to_model/{c,exo,halide,noarr}/full/<benchmark>-<attempt>/code.cpp`.
+  Plan-application prompts, requests, and responses are in `prompts/from_model/`,
+  `requests/openai/from_model/`, and `responses/openai/from_model/`; parsed
+  generated implementations are in
+  `from_model/{c,exo,halide,noarr}/full/<benchmark>-<attempt>/code.cpp`.
+- Methodology / validation and measurement: the collected per-size validation
+  and timing CSVs are `validation_*.csv` and `times_*.csv` under
+  `results/translation/20260704/` and `results/optimization/20260704/`.
+  The scripts that produce these files are `measure_translations.sh`,
+  `measure_optimizations.sh`, and the analysis scripts in `scripts/`.
+- Evaluation / translation results: the translation-performance and validity
+  claims are backed by `results/translation/20260704/` and the corresponding
+  plot tables under `results/plots/20260704/`.
+- Evaluation / optimization results and RQ answers: aggregate prompt/framework
+  summaries are in `results/plots/20260704-extralarge/framework_prompt_summary.csv`,
+  invalid-attempt diagnostics are in
+  `results/plots/20260704-extralarge/failure_counts.csv`, best-of-`k` budget
+  curves are in `results/plots/20260704-extralarge/best_of_k.csv` and
+  `results/plots/20260704-extralarge/best_of_k_budget.pdf`, and per-attempt
+  speedups are in `results/plots/20260704-extralarge/speedups_datasets-EXTRALARGE.csv`.
+- Evaluation / RQ5 qualitative inspection: direct-C All-Hints examples include
+  `optimization/c_all_hints/full/doitgen-05/code.cpp`,
+  `optimization/c_all_hints/full/3mm-01/code.cpp`, and
+  `optimization/c_all_hints/full/correlation-02/code.cpp`; their measured
+  EXTRALARGE rows are in
+  `results/plots/20260704-extralarge/speedups_datasets-EXTRALARGE.csv`.
+  These files are starting points for inspecting generated low-level rewrites,
+  not separate aggregate evidence.
+- Evaluation / alternative baselines and prior-work context: fixed-baseline
+  comparisons are in `results/plots/20260704-extralarge-tiramisu/`,
+  `results/plots/20260704-extralarge-polly/`, and
+  `results/plots/20260704-extralarge-min-c-polly/`; raw ComPilot/Tiramisu
+  measurement exports are in `results/compilot/`.
+
 ## 🤖 Generating the LLM solutions
 
 For the initial translation task, run the following set of commands:
