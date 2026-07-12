@@ -91,8 +91,8 @@ package, while low-level paths are documented here.
   plot tables under `results/plots/20260704/`.
 - Evaluation / optimization results and RQ answers: aggregate prompt/framework
   summaries are in `results/plots/20260704-extralarge/framework_prompt_summary.csv`,
-  invalid-attempt diagnostics are in
-  `results/plots/20260704-extralarge/failure_counts.csv`, best-of-`k` budget
+  the all-size invalid-attempt diagnostics reported in the paper are in
+  `results/plots/20260704/failure_counts.csv`, best-of-`k` budget
   curves are in `results/plots/20260704-extralarge/best_of_k.csv` and
   `results/plots/20260704-extralarge/best_of_k_budget.pdf`, and per-attempt
   speedups are in `results/plots/20260704-extralarge/speedups_datasets-EXTRALARGE.csv`.

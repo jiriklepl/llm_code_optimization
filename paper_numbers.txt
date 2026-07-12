@@ -1,6 +1,6 @@
 Exo non-valid translations: 12
 Noarr non-valid translations: 30
-Halide non-valid translations: 67
+Halide non-valid translations: 61
 Optimization failure-category summary
 Source: results/plots/20260704/failure_counts.csv
 All frameworks total optimization attempts: 2080

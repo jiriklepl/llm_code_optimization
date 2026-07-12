@@ -9,7 +9,8 @@ failure_counts_csv="results/plots/${results_tag}/failure_counts.csv"
 count_nonvalid_translations() {
 	local framework="$1"
 	find "${translation_results_dir}" -mindepth 2 -maxdepth 2 -name 'validation_*.csv' -exec \
-		awk -F, -v framework="${framework}" '$1 == framework && $5 != "valid" { print $2 "," $6 }' {} + |
+		awk -F, -v framework="${framework}" \
+			'$1 == framework && $2 !~ /^(2mm|gemm|floyd-warshall|heat-3d)$/ && $5 != "valid" { print $2 "," $6 }' {} + |
 		sort -u |
 		wc -l
 }
