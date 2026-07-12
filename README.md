@@ -2,7 +2,7 @@
 
 # Artifact: Effect of Abstractions and Prompting Strategies on LLM-Guided High-Performance Optimizations
 
-This repository contains the replication package for the paper "Effect of Abstractions and Prompting Strategies on LLM-Guided High-Performance Optimizations" submitted to HLPP 2026. The package includes all necessary code, scripts, and instructions to reproduce the results presented in the paper.
+This repository contains the replication package for the paper "Effect of Abstractions and Prompting Strategies on LLM-Guided High-Performance Optimizations" submitted to ICA3PP 2026. The package includes all necessary code, scripts, and instructions to reproduce the results presented in the paper.
 
 ```bibtex
 @inproceedings{ TODO }
