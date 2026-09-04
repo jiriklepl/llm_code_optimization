@@ -1280,6 +1280,10 @@ def plot_dataset_size_aggregates(
     if df.empty or "dataset_size" not in df.columns or color_field not in df.columns:
         return
 
+    if color_field == "framework":
+        df = df.copy()
+        df["framework"] = df["framework"].apply(normalize_framework_value)
+
     dataset_sizes = list(dict.fromkeys(df["dataset_size"].astype(str)))
     color_values = list(dict.fromkeys(df[color_field]))
     cmap = plt.get_cmap("tab10")

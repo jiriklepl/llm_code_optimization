@@ -38,6 +38,7 @@ from analyze_results import (
     merge_baseline_tables,
     normalize_cli_args,
     normalize_baseline_spec,
+    normalize_framework_value,
     normalize_version_column,
     select_best_standard_baseline,
     select_standard_baseline,
@@ -360,11 +361,11 @@ def _plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
                     (prompt_data["data_type"] == data_type)
                     & (prompt_data["framework"] == framework)
                 ].sort_values("k")
-                label = f"{data_type} {framework}"
+                label = f"{data_type} {normalize_framework_value(framework)}"
             else:
                 (framework,) = key
                 data = prompt_data[prompt_data["framework"] == framework].sort_values("k")
-                label = framework
+                label = normalize_framework_value(framework)
             if data.empty:
                 continue
             axes[0, column].plot(
