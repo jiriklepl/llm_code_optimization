@@ -19,6 +19,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FixedLocator, MaxNLocator
 
 from analyze_results import (
     BASELINE_FRAMEWORK,
@@ -45,6 +46,7 @@ from analyze_results import (
 
 EXPECTED_ATTEMPTS = 5
 NUMERICAL_MISMATCH_STATUSES = {"false", "invalid", "validity_error"}
+BEST_OF_K_FONT_SIZE = 18
 
 
 def validate_five_attempts(validation: pd.DataFrame) -> None:
@@ -323,6 +325,13 @@ def summarize_framework_prompt(
 def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
     """Plot success probability and expected speedup as budget increases."""
 
+    with plt.rc_context({"font.size": BEST_OF_K_FONT_SIZE}):
+        _plot_budget_curves(budget, out_path)
+
+
+def _plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
+    """Render budget curves with the caller's active Matplotlib style."""
+
     prompts = sorted(budget["prompt"].unique())
     include_data_type = "data_type" in budget.columns and budget["data_type"].nunique(dropna=False) > 1
     series_cols = ["data_type", "framework"] if include_data_type else ["framework"]
@@ -380,8 +389,21 @@ def plot_budget_curves(budget: pd.DataFrame, out_path: Path) -> None:
         axes[1, column].set_xlabel("Attempt budget k")
 
     axes[0, 0].set_ylabel("Expected speedup\n(with C fallback)")
-    axes[1, 0].set_ylabel("P(validated candidate) (%)")
-    axes[1, 0].set_ylim(bottom=0.0)
+    axes[0, 0].set_ylim(bottom=0.0)
+    axes[0, 0].yaxis.set_major_locator(MaxNLocator(nbins=5))
+    axes[1, 0].set_ylabel("P(validated\ncandidate) (%)")
+    minimum_probability = 100.0 * budget["probability_validated_candidate"].min()
+    probability_bottom = max(
+        0.0, 10.0 * math.floor((minimum_probability - 1.0) / 10.0)
+    )
+    axes[1, 0].set_ylim(bottom=probability_bottom)
+    probability_ticks = sorted(
+        {probability_bottom, *np.arange(0.0, 101.0, 20.0)}
+    )
+    probability_ticks = [
+        tick for tick in probability_ticks if tick >= probability_bottom
+    ]
+    axes[1, 0].yaxis.set_major_locator(FixedLocator(probability_ticks))
     handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=max(1, len(series_keys)))
