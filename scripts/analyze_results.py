@@ -33,6 +33,7 @@ VALIDITY_FAILURE_STATUSES = {"invalid", "false", "validity_error"}
 RUNTIME_FAILURE_STATUSES = {"runtime_error", "timeout"}
 COMPILE_FAILURE_STATUSES = {"compile_error", "illegal"}
 
+FONT_SIZE = 18
 
 def normalize_status_column(series: pd.Series) -> pd.Series:
     """Normalize status strings into a lowercase series."""
@@ -976,10 +977,10 @@ def plot_category_shares(
     if ordering == "tree":
         add_category_boundaries(ax, algorithms, tree_categories)
     ax.set_xticks(x_positions)
-    ax.set_xticklabels(algorithms, rotation=45, ha="right", fontsize=12)
+    ax.set_xticklabels(algorithms, rotation=45, ha="right")
     ax.set_ylim(0, 100)
-    ax.set_ylabel("Share of repetitions (%)", fontsize=14)
-    ax.legend(loc="best")
+    ax.set_ylabel("Share of repetitions (%)")
+    ax.legend(loc="best", ncol=2)
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1214,8 +1215,8 @@ def plot_algorithms(
     if ordering == "tree":
         add_category_boundaries(ax, algorithms, tree_categories)
     ax.set_xticks(range(len(algorithms)))
-    ax.set_xticklabels(algorithms, rotation=45, ha="right", fontsize=12)
-    ax.set_ylabel("Speedup over baseline", fontsize=14)
+    ax.set_xticklabels(algorithms, rotation=45, ha="right")
+    ax.set_ylabel("Speedup over baseline")
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1229,7 +1230,7 @@ def plot_algorithms(
             )
             for val in palette_values
         ]
-        ax.legend(handles=handles, title=color_label, loc="best")
+        ax.legend(handles=handles, title=color_label, loc="best", ncol=2)
     elif plot_kind != "box":
         handles = [
             plt.Line2D(
@@ -1242,7 +1243,7 @@ def plot_algorithms(
             )
             for val in palette_values
         ]
-        ax.legend(handles=handles, title=color_label, loc="best")
+        ax.legend(handles=handles, title=color_label, loc="best", ncol=2)
 
     bottom = y_min
     top = y_max
@@ -1375,8 +1376,8 @@ def plot_dataset_size_aggregates(
 
     ax.axhline(1.0, linestyle="--", color="gray", linewidth=1.0)
     ax.set_xticks(range(len(dataset_sizes)))
-    ax.set_xticklabels(dataset_sizes, rotation=45, ha="right", fontsize=12)
-    ax.set_ylabel("Speedup over baseline", fontsize=14)
+    ax.set_xticklabels(dataset_sizes, rotation=45, ha="right")
+    ax.set_ylabel("Speedup over baseline")
 
     if plot_kind == "box" and color_field != "repetition":
         handles = [
@@ -1390,7 +1391,7 @@ def plot_dataset_size_aggregates(
             )
             for val in color_values
         ]
-        ax.legend(handles=handles, title=color_label, loc="best")
+        ax.legend(handles=handles, title=color_label, loc="best", ncol=2)
     elif plot_kind != "box":
         handles = [
             plt.Line2D(
@@ -1403,7 +1404,7 @@ def plot_dataset_size_aggregates(
             )
             for val in color_values
         ]
-        ax.legend(handles=handles, title=color_label, loc="best")
+        ax.legend(handles=handles, title=color_label, loc="best", ncol=2)
 
     bottom = y_min
     top = y_max
@@ -1659,14 +1660,14 @@ def plot_heatmap_table(
             norm_val = im.norm(val)
             text_color = "black" if norm_val < 0.6 else "white"
             fmt = fmt_overrides.get(col_label, value_fmt)
-            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color, fontsize=12)
+            ax.text(j, i, fmt.format(val), ha="center", va="center", color=text_color)
 
     ax.set_xticks(np.arange(len(col_labels)))
     display_col_labels = ["overall" if label == "geom_mean" else label for label in col_labels]
     display_row_labels = ["overall" if label == "geom_mean" else label for label in row_labels]
-    ax.set_xticklabels(display_col_labels, rotation=45, ha="right", fontsize=12)
+    ax.set_xticklabels(display_col_labels, rotation=45, ha="right")
     ax.set_yticks(np.arange(len(row_labels)))
-    ax.set_yticklabels(display_row_labels, fontsize=12)
+    ax.set_yticklabels(display_row_labels)
 
     if not hide_colorbar:
         cbar = fig.colorbar(im, ax=ax)
@@ -3053,4 +3054,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with plt.rc_context({"font.size": FONT_SIZE}):
+        main()
